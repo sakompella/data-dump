@@ -1,7 +1,6 @@
 import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { parseRambleId, parseThoughtId } from '$lib/ids';
 import {
 	RAMBLE_STATUSES,
 	TODO_STATES,
@@ -11,19 +10,9 @@ import {
 	type ThoughtId
 } from './domain';
 import { formatDocument, parseDocument } from './frontmatter';
+import { rambleId, thoughtId } from './schemas';
 
 const isoDate = z.iso.datetime().transform((raw) => new Date(raw));
-const brandedId = <Id>(parseId: (raw: string) => Id | null) =>
-	z.string().transform((raw, ctx) => {
-		const id = parseId(raw);
-		if (id === null) {
-			ctx.addIssue({ code: 'custom', message: `malformed id ${raw}` });
-			return z.NEVER;
-		}
-		return id;
-	});
-const rambleId = brandedId(parseRambleId);
-const thoughtId = brandedId(parseThoughtId);
 
 const rambleMeta = z.object({
 	id: rambleId,
