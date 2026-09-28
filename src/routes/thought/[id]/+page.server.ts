@@ -2,10 +2,10 @@ import { error, fail, redirect } from '@sveltejs/kit';
 import { z } from 'zod';
 import { parseThoughtId } from '$lib/ids';
 import { rambles } from '$lib/server/app';
-import { todoState } from '$lib/server/schemas';
+import { formText, todoState } from '$lib/server/schemas';
 import type { Actions, PageServerLoad } from './$types';
 
-const thoughtEdit = z.object({ label: z.string().trim(), body: z.string(), todo: todoState });
+const thoughtEdit = z.object({ label: formText.pipe(z.string().trim()), body: formText, todo: todoState });
 
 function thoughtIdFrom(params: { id: string }) {
 	const id = parseThoughtId(params.id);

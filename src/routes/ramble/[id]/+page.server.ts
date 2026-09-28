@@ -1,6 +1,7 @@
 import { error, fail } from '@sveltejs/kit';
 import { parseRambleId } from '$lib/ids';
 import { rambles } from '$lib/server/app';
+import { formText } from '$lib/server/schemas';
 import type { Actions, PageServerLoad } from './$types';
 
 function rambleIdFrom(params: { id: string }) {
@@ -17,9 +18,9 @@ export const load: PageServerLoad = async ({ params }) => {
 
 export const actions = {
 	save: async ({ params, request }) => {
-		const body = (await request.formData()).get('body');
-		if (typeof body !== 'string') return fail(400, { invalid: true });
-		const found = await (await rambles()).editRamble({ id: rambleIdFrom(params), body });
+		const body = formText.safeParse((await request.formData()).get('body'));
+		if (!body.success) return fail(400, { invalid: true });
+		const found = await (await rambles()).editRamble({ id: rambleIdFrom(params), body: body.data });
 		if (!found) error(404, 'No such ramble');
 		return { saved: true };
 	}

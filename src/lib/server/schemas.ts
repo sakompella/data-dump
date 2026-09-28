@@ -15,3 +15,6 @@ const brandedId = <Id>(parseId: (raw: string) => Id | null) =>
 export const rambleId = brandedId(parseRambleId);
 export const thoughtId = brandedId(parseThoughtId);
 export const todoState = z.enum(TODO_STATES);
+
+// Browsers submit textarea newlines as CRLF; the capture box (JS) sends LF.
+export const formText = z.string().transform((text) => text.replace(/\r\n?/g, '\n'));
