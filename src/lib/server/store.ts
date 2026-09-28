@@ -8,7 +8,7 @@ import {
 	type RambleId,
 	type Thought,
 	type ThoughtId
-} from './domain';
+} from '$lib/domain';
 import { formatDocument, parseDocument } from './frontmatter';
 import { rambleId, thoughtId } from './schemas';
 

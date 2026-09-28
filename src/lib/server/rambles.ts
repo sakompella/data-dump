@@ -1,7 +1,7 @@
 import { newRambleId, newThoughtId } from '$lib/ids';
 import { isIdle } from '$lib/idle';
 import { copiesFromProposals, wholeRambleCopy } from './copies';
-import { advance, type Ramble, type RambleId, type Thought, type ThoughtId } from './domain';
+import { advance, type Ramble, type RambleId, type Thought, type ThoughtId } from '$lib/domain';
 import { createKeyedMutex } from './keyed-mutex';
 import type { Splitter } from './splitter';
 import type { Store } from './store';

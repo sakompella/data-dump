@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { parseRambleId, parseThoughtId } from '$lib/ids';
-import { TODO_STATES } from './domain';
+import { TODO_STATES } from '$lib/domain';
 
 const brandedId = <Id>(parseId: (raw: string) => Id | null) =>
 	z.string().transform((raw, ctx) => {

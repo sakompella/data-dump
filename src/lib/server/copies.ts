@@ -1,4 +1,4 @@
-import type { TodoState } from './domain';
+import type { TodoState } from '$lib/domain';
 
 export interface ProposedThought {
 	readonly label: string;

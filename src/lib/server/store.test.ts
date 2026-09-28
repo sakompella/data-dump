@@ -1,7 +1,7 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { newRambleId, newThoughtId } from '$lib/ids';
-import { RAMBLE_STATUSES, TODO_STATES, type Ramble, type Thought } from './domain';
+import { RAMBLE_STATUSES, TODO_STATES, type Ramble, type Thought } from '$lib/domain';
 import { formatRamble, formatThought, parseRamble, parseThought } from './store';
 
 const awkwardText = fc.oneof(
