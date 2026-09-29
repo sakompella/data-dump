@@ -24,9 +24,20 @@ a {
 	color: var(--accent);
 }
 
+header.site {
+	display: flex;
+	justify-content: space-between;
+	align-items: baseline;
+	margin-bottom: 1rem;
+}
+
+header.site > a {
+	font-size: 0.9rem;
+}
+
 h1 {
 	font-size: 1.1rem;
-	margin: 0 0 1rem;
+	margin: 0;
 }
 
 h1 a {

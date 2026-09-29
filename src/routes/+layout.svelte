@@ -2,7 +2,7 @@
 	import '../app.css';
 	import favicon from '$lib/assets/favicon.svg';
 
-	let { children } = $props();
+	let { children, data } = $props();
 </script>
 
 <svelte:head>
@@ -10,6 +10,13 @@
 </svelte:head>
 
 <main>
-	<h1><a href="/">data-dump</a></h1>
+	<header class="site">
+		<h1><a href="/">data-dump</a></h1>
+		{#if data.chatgpt === 'needs-reconnect'}
+			<a class="failed" href="/connect">reconnect ChatGPT</a>
+		{:else if data.chatgpt}
+			<a class="meta" href="/connect">ChatGPT</a>
+		{/if}
+	</header>
 	{@render children()}
 </main>
