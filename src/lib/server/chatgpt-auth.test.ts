@@ -200,6 +200,18 @@ describe('login', () => {
 		expect((await auth.completeLogin(callback({ ...goodParams, state }))).ok).toBe(false);
 	});
 
+	it('shows the pending sign-in address until it expires or completes', async () => {
+		const auth = createChatGPTAuth({ dir, now, authBaseUrl: AUTH });
+		expect(await auth.pendingLogin()).toBeNull();
+		const url = await auth.startLogin();
+		expect((await auth.pendingLogin())?.toString()).toBe(url.toString());
+		advance(PENDING_LOGIN_TTL_MS + 1);
+		expect(await auth.pendingLogin()).toBeNull();
+
+		const { auth: connected } = await connect([]);
+		expect(await connected.pendingLogin()).toBeNull();
+	});
+
 	it('disconnect deletes the token file', async () => {
 		const { auth } = await connect([]);
 		await auth.disconnect();

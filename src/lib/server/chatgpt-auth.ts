@@ -61,8 +61,11 @@ export class NotConnected extends Error {}
 
 export type CallbackResult = { ok: true; code: string; clientId: string } | { ok: false; error: string };
 
+const isExpired = (pending: PendingLogin, now: Date) =>
+	now.getTime() - pending.createdAt.getTime() > PENDING_LOGIN_TTL_MS;
+
 export function parseCallbackUrl(input: string, pending: PendingLogin, now: Date): CallbackResult {
-	if (now.getTime() - pending.createdAt.getTime() > PENDING_LOGIN_TTL_MS) {
+	if (isExpired(pending, now)) {
 		return { ok: false, error: 'This sign-in link has expired. Start again.' };
 	}
 	let url: URL;
@@ -138,6 +141,24 @@ export function createChatGPTAuth({
 		const parsed = schema.safeParse(json);
 		if (!parsed.success) console.warn(`chatgpt: ignoring malformed file ${path}`);
 		return parsed.success ? parsed.data : null;
+	}
+
+	async function authorizeUrl(pending: PendingLogin): Promise<URL> {
+		const url = new URL(`${authBaseUrl}/api/accounts/authorize`);
+		url.search = new URLSearchParams({
+			client_id: DYNAMIC_CLIENT_ID,
+			agent_name_hint: AGENT_NAME_HINT,
+			ext_agent_host_id: `urn:uuid:${(await deviceId()).toLowerCase()}`,
+			response_type: 'code',
+			redirect_uri: pending.redirectUri,
+			resource: RESOURCE,
+			scope: SCOPE,
+			state: pending.state,
+			code_challenge: await pkceChallenge(pending.verifier),
+			code_challenge_method: 'S256',
+			nonce: pending.nonce
+		}).toString();
+		return url;
 	}
 
 	const readCredential = () => readJson(credentialPath, credentialFile);
@@ -236,30 +257,21 @@ export function createChatGPTAuth({
 
 		// Returns the address the user opens to sign in.
 		async startLogin(): Promise<URL> {
-			const verifier = randomValue();
 			const pending: PendingLogin = {
-				verifier,
+				verifier: randomValue(),
 				state: randomValue(),
 				nonce: randomValue(),
 				redirectUri: REDIRECT_URI,
 				createdAt: now()
 			};
-			const url = new URL(`${authBaseUrl}/api/accounts/authorize`);
-			url.search = new URLSearchParams({
-				client_id: DYNAMIC_CLIENT_ID,
-				agent_name_hint: AGENT_NAME_HINT,
-				ext_agent_host_id: `urn:uuid:${(await deviceId()).toLowerCase()}`,
-				response_type: 'code',
-				redirect_uri: pending.redirectUri,
-				resource: RESOURCE,
-				scope: SCOPE,
-				state: pending.state,
-				code_challenge: await pkceChallenge(verifier),
-				code_challenge_method: 'S256',
-				nonce: pending.nonce
-			}).toString();
 			await writeSecret(pendingPath, { ...pending, createdAt: pending.createdAt.toISOString() });
-			return url;
+			return authorizeUrl(pending);
+		},
+
+		// The sign-in address of a login started less than ten minutes ago.
+		async pendingLogin(): Promise<URL | null> {
+			const pending = await readJson(pendingPath, pendingFile);
+			return pending && !isExpired(pending, now()) ? authorizeUrl(pending) : null;
 		},
 
 		async completeLogin(pastedUrl: string): Promise<{ ok: true } | { ok: false; error: string }> {
