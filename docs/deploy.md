@@ -32,7 +32,7 @@ Under `vars`:
 - `ACCESS_TEAM_DOMAIN`: the team domain from step 1.
 - `ACCESS_AUD`: the AUD tag from step 1.
 - `CHATGPT_MODEL`: the model used to split rambles. `gpt-5-mini` is only an example; it is not checked.
-  Which models a ChatGPT plan accepts is up to OpenAI. While it is empty, rambles are not split.
+  Which models a ChatGPT plan accepts is up to OpenAI. While it is empty and ChatGPT is connected, ended rambles wait and are not split. Without a ChatGPT connection, each ramble becomes one thought whatever this value is.
 
 Do not set `DEV_USER_ID` here. It only works in `pnpm dev`. `pnpm preview` answers 401 everywhere, because it has no Access token.
 
