@@ -50,6 +50,11 @@ export function createFakeLockManager() {
 	return {
 		request,
 		held: () => [...held],
+		// Frees a held lock, as when the tab holding it crashes or closes.
+		release(name: string) {
+			held.delete(name);
+			queues.get(name)?.shift()?.();
+		},
 		// Holds every `ifAvailable` probe until the returned function is called.
 		pauseProbes(): () => void {
 			let release = () => {};

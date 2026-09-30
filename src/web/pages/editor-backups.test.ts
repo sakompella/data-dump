@@ -400,3 +400,100 @@ describe.each(editors)('recovery in the %s editor', (editor) => {
 		expect(storedValues()).toContain('left behind');
 	});
 });
+
+// The key of the stored backup holding `text`, and the tab id it carries.
+function keyHolding(items: ReadonlyMap<string, string>, text: string): string {
+	const key = [...items].find(([, value]) => value.includes(text))?.[0];
+
+	if (!key) throw new Error(`no backup holds "${text}"`);
+
+	return key;
+}
+
+const tabOf = (key: string) => (key.split(':').at(-1) ?? '').split('~')[0] ?? '';
+
+const allStored = (items: ReadonlyMap<string, string>) => [...items.values()].join('\n');
+
+describe.each(editors)('an unreadable own backup in the %s editor', (editor) => {
+	const idOf = (ids: { rambleId: RambleId; thoughtId: ThoughtId }) =>
+		editor === 'thought' ? ids.thoughtId : ids.rambleId;
+
+	// Leaves this tab's own backup "mine A", then makes its first read fail.
+	async function ownBackupReadFailsOnce(flaky: ReturnType<typeof createFlakyStorage>, id: string) {
+		const mine = await openEditor(editor, id, 'new tab');
+		offline = true;
+		await mine.save('mine A');
+		offline = false;
+		await mine.close();
+		const own = keyHolding(flaky.items, 'mine A');
+		let failed = false;
+		flaky.failReads((key) => {
+			if (key !== own || failed) return false;
+			failed = true;
+
+			return true;
+		});
+	}
+
+	it('is not overwritten by a restored backup of a closed tab', async () => {
+		const flaky = createFlakyStorage();
+		vi.stubGlobal('localStorage', flaky.storage);
+		const ids = await publishedThought('the server copy');
+		const orphanTab = await openEditor(editor, idOf(ids), 'new tab');
+		offline = true;
+		await orphanTab.save('orphan B');
+		offline = false;
+		await ownBackupReadFailsOnce(flaky, idOf(ids));
+		// The orphan's tab closes.
+		locks.release(`data-dump:editor-tab:${tabOf(keyHolding(flaky.items, 'orphan B'))}`);
+
+		await openEditor(editor, idOf(ids), 'same tab');
+
+		expect(allStored(flaky.items)).toContain('mine A');
+		expect(allStored(flaky.items)).toContain('orphan B');
+	});
+
+	it('is not overwritten by new typing', async () => {
+		const flaky = createFlakyStorage();
+		vi.stubGlobal('localStorage', flaky.storage);
+		const ids = await publishedThought('the server copy');
+		await ownBackupReadFailsOnce(flaky, idOf(ids));
+
+		const page = await openEditor(editor, idOf(ids), 'same tab');
+		page.type('typed now');
+		await settle();
+
+		expect(allStored(flaky.items)).toContain('mine A');
+		expect(allStored(flaky.items)).toContain('typed now');
+	});
+});
+
+describe.each(editors)('using other drafts in the %s editor', (editor) => {
+	const idOf = (ids: { rambleId: RambleId; thoughtId: ThoughtId }) =>
+		editor === 'thought' ? ids.thoughtId : ids.rambleId;
+
+	it('keeps every draft when two are used within one millisecond', async () => {
+		const ids = await publishedThought('the server copy');
+
+		for (const text of ['draft B', 'draft C', 'draft D'])
+			await leaveBackup(editor, idOf(ids), text);
+		const page = await openEditor(editor, idOf(ids), 'reload');
+		vi.useFakeTimers({ toFake: ['Date'] });
+
+		try {
+			for (let use = 0; use < 2; use += 1) {
+				const button = [...page.target.querySelectorAll('button')].find((b) =>
+					/use this text/i.test(b.textContent ?? '')
+				);
+
+				if (!button) throw new Error('no other draft to use');
+				button.click();
+				await settle();
+			}
+		} finally {
+			vi.useRealTimers();
+		}
+
+		for (const text of ['draft B', 'draft C', 'draft D']) expect(storedValues()).toContain(text);
+	});
+});
