@@ -1,10 +1,18 @@
-import { newRambleId, newThoughtId } from '$lib/ids';
+import { newPublicationId, newRambleId, newThoughtId, type Revision } from '$lib/ids';
 import { isIdle } from '$lib/idle';
+import type { ProposedThought } from '$lib/proposals';
+import {
+	advance,
+	isPublished,
+	type PublicationId,
+	type Ramble,
+	type RambleId,
+	type RambleStatus,
+	type Thought,
+	type ThoughtId
+} from '$lib/domain';
 import { copiesFromProposals, wholeRambleCopy } from './copies';
-import { advance, type Ramble, type RambleId, type Thought, type ThoughtId } from '$lib/domain';
-import { createKeyedMutex } from './keyed-mutex';
-import type { Splitter } from './splitter';
-import type { Store } from './store';
+import { WriteRateLimited, type Store, type Stored } from './store';
 
 export type RambleService = ReturnType<typeof createRambleService>;
 
@@ -14,214 +22,314 @@ export interface ThoughtEdit {
 	readonly todo: Thought['todo'];
 }
 
+// A write based on what the caller last read: `conflict` means the document
+// changed since then and nothing was written.
+export type EditResult = 'saved' | 'conflict' | 'missing';
+
+export type FinishResult =
+	| { kind: 'published'; publication: PublicationId }
+	| { kind: 'not-ended'; status: RambleStatus }
+	| { kind: 'missing' }
+	| { kind: 'conflict' };
+
+export interface PendingSplit {
+	readonly id: RambleId;
+	readonly body: string;
+}
+
 const newestFirst = (a: Thought, b: Thought) =>
 	b.createdAt.getTime() - a.createdAt.getTime() || a.id.localeCompare(b.id);
 
+// Waits between tries when R2 refuses a write for coming within a second of the last one.
+const RATE_LIMIT_BACKOFF_MS = [250, 500, 1000, 2000];
+
+// How often a status change is retried after another write got there first.
+const CONFLICT_RETRIES = 3;
+
 export function createRambleService({
 	store,
-	split,
-	now = () => new Date()
+	now = () => new Date(),
+	sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 }: {
 	store: Store;
-	split: Splitter;
 	now?: () => Date;
+	sleep?: (ms: number) => Promise<void>;
 }) {
-	const withLock = createKeyedMutex();
-	const splitsInFlight = new Map<RambleId, Promise<void>>();
+	async function retryRateLimited<T>(write: () => Promise<T>): Promise<T> {
+		for (const delay of RATE_LIMIT_BACKOFF_MS) {
+			try {
+				return await write();
+			} catch (error) {
+				if (!(error instanceof WriteRateLimited)) throw error;
+				await sleep(delay);
+			}
+		}
 
-	async function createRamble(id: RambleId, body: string): Promise<void> {
-		if (body === '') return;
+		return write();
+	}
+
+	const openRamble = (id: RambleId, body: string): Ramble => {
 		const at = now();
-		await store.writeRamble({ id, status: 'open', createdAt: at, updatedAt: at, body });
+
+		return { id, status: 'open', createdAt: at, updatedAt: at, body };
+	};
+
+	// Text that cannot go into the ramble it was meant for goes into a new one.
+	async function saveAsReplacement(body: string) {
+		const id = newRambleId();
+
+		if (body === '') return { id, revision: null };
+		const created = await store.createRamble(openRamble(id, body));
+
+		if (!created) throw new Error(`ramble ${id} already exists`);
+
+		return { id, revision: created.revision };
 	}
 
-	// Open rambles past the idle gap are ended. Empty ones are deleted instead.
-	async function endIfOpen(id: RambleId, onlyIfIdle: boolean): Promise<void> {
-		await withLock(id, async () => {
-			const ramble = await store.readRamble(id);
+	const endedState = (ramble: Ramble) =>
+		advance(ramble, { status: ramble.body.trim() === '' ? 'discarded' : 'ended' });
 
-			if (!ramble || ramble.status !== 'open') return;
+	// Ends the latest version of an open ramble; empty ones are discarded.
+	async function end(id: RambleId): Promise<Stored<Ramble> | null> {
+		for (let attempt = 0; attempt < CONFLICT_RETRIES; attempt += 1) {
+			const current = await store.readRamble(id);
 
-			if (onlyIfIdle && !isIdle(ramble.updatedAt, now())) return;
+			if (!current || current.status !== 'open') return current;
 
-			if (ramble.body.trim() === '') {
-				await store.deleteRamble(id);
+			const ended = await retryRateLimited(() =>
+				store.replaceRamble(endedState(current), current.revision)
+			);
 
-				return;
-			}
-
-			await store.writeRamble(advance(ramble, 'ended'));
-		});
-	}
-
-	async function splitIfEnded(id: RambleId): Promise<void> {
-		const snapshot = await store.readRamble(id);
-
-		if (!snapshot || snapshot.status !== 'ended') return;
-
-		let proposals;
-
-		try {
-			proposals = await split(snapshot.body);
-		} catch (error) {
-			console.error(`split ${id}: model call failed; ramble stays ended for a later retry`, error);
-
-			return;
+			if (ended) return ended;
 		}
 
-		const kept = copiesFromProposals(snapshot.body, proposals);
-
-		if (kept.length > 0) {
-			console.info(`split ${id}: ${kept.length} of ${proposals.length} proposed thoughts kept`);
-		} else {
-			console.info(`split ${id}: nothing usable from the model; keeping the whole ramble`);
-		}
-
-		const copies = kept.length > 0 ? kept : [wholeRambleCopy(snapshot.body)];
-
-		await withLock(id, async () => {
-			const latest = await store.readRamble(id);
-
-			if (!latest || latest.status !== 'ended') return;
-			// Thoughts of a ramble that is not split yet were never shown; they
-			// can only be leftovers of an interrupted split.
-			const leftovers = (await store.listThoughts()).filter((t) => t.rambleId === id);
-			await Promise.all(leftovers.map((t) => store.deleteThought(t.id)));
-			const createdAt = now();
-
-			for (const copy of copies) {
-				await store.writeThought({ id: newThoughtId(), rambleId: id, createdAt, ...copy });
-			}
-
-			await store.writeRamble(advance(latest, 'split'));
-		});
+		throw new Error(`ramble ${id} kept changing while being ended`);
 	}
 
-	function splitOnce(id: RambleId): Promise<void> {
-		const running = splitsInFlight.get(id);
+	// Stale open rambles are ended on page load. If one changed since it was
+	// listed, it was just written to, so it is left as it now is.
+	async function endIfIdle(ramble: Stored<Ramble>): Promise<Stored<Ramble>> {
+		if (ramble.status !== 'open' || !isIdle(ramble.updatedAt, now())) return ramble;
 
-		if (running) return running;
-		const started = splitIfEnded(id).finally(() => splitsInFlight.delete(id));
-		splitsInFlight.set(id, started);
+		const ended = await retryRateLimited(() =>
+			store.replaceRamble(endedState(ramble), ramble.revision)
+		);
 
-		return started;
+		return ended ?? (await store.readRamble(ramble.id)) ?? ramble;
 	}
 
-	async function isPublished(thought: Thought): Promise<boolean> {
-		return (await store.readRamble(thought.rambleId))?.status === 'split';
+	async function publishedThought(id: ThoughtId): Promise<Stored<Thought> | null> {
+		const thought = await store.readThought(id);
+
+		if (!thought || thought.deleted) return null;
+		const ramble = await store.readRamble(thought.rambleId);
+
+		return ramble && isPublished(thought, ramble) ? thought : null;
+	}
+
+	async function replacePublishedThought(
+		id: ThoughtId,
+		base: Revision,
+		change: (thought: Thought) => Thought
+	): Promise<EditResult> {
+		const thought = await publishedThought(id);
+
+		if (!thought) return 'missing';
+
+		if (thought.revision !== base) return 'conflict';
+		const saved = await retryRateLimited(() => store.replaceThought(change(thought), base));
+
+		return saved ? 'saved' : 'conflict';
 	}
 
 	return {
-		// Upsert. A ramble that is no longer open is never reopened: the text
-		// goes into a new ramble so it is not lost. Returns the id that holds it.
-		async saveDraft({ id, body }: { id: RambleId; body: string }): Promise<RambleId> {
-			const accepted = await withLock(id, async () => {
-				const existing = await store.readRamble(id);
+		// Upsert against the revision the caller last saw. A stale save is
+		// never merged or dropped: its text goes into a new ramble whose id
+		// is returned. Rejects with WriteRateLimited when R2 needs a pause.
+		async saveDraft({
+			id,
+			body,
+			base
+		}: {
+			id: RambleId;
+			body: string;
+			base: Revision | null;
+		}): Promise<{ id: RambleId; revision: Revision | null }> {
+			const existing = await store.readRamble(id);
 
-				if (!existing) {
-					await createRamble(id, body);
+			if (!existing) {
+				if (body === '') return { id, revision: null };
+				const created = await store.createRamble(openRamble(id, body));
 
-					return true;
+				return created ? { id, revision: created.revision } : saveAsReplacement(body);
+			}
+
+			if (existing.status === 'open') {
+				if (existing.body === body) return { id, revision: existing.revision };
+
+				if (existing.revision === base) {
+					const saved = await store.replaceRamble({ ...existing, body, updatedAt: now() }, base);
+
+					if (saved) return { id, revision: saved.revision };
+				}
+			}
+
+			return saveAsReplacement(body);
+		},
+
+		// Returns the ramble's text when it is waiting for a split.
+		async endRamble(id: RambleId): Promise<PendingSplit | null> {
+			const ended = await end(id);
+
+			return ended?.status === 'ended' ? { id, body: ended.body } : null;
+		},
+
+		// Copies the proposals out of the stored body and publishes them, once.
+		// Each run writes its thoughts under a fresh publication id, then
+		// commits that id onto the ramble only if the ramble is unchanged
+		// since it was read. Thoughts of a run that lost are never shown.
+		async finishSplit({
+			id,
+			attempt,
+			proposals
+		}: {
+			id: RambleId;
+			attempt: string;
+			proposals: readonly ProposedThought[];
+		}): Promise<FinishResult> {
+			for (let run = 0; run < CONFLICT_RETRIES; run += 1) {
+				const current = await store.readRamble(id);
+
+				if (!current) return { kind: 'missing' };
+
+				if (current.status === 'split') {
+					return { kind: 'published', publication: current.publication };
 				}
 
-				if (existing.status !== 'open') return false;
-				await store.writeRamble({ ...existing, body, updatedAt: now() });
+				if (current.status !== 'ended') return { kind: 'not-ended', status: current.status };
+				const publication = newPublicationId();
+				const kept = copiesFromProposals(current.body, proposals);
 
-				return true;
-			});
+				console.info(
+					`split ${id} (attempt ${attempt}): kept ${kept.length} of ${proposals.length} proposed thoughts` +
+						(kept.length === 0 ? '; keeping the whole ramble' : '')
+				);
 
-			if (accepted) return id;
-			const replacement = newRambleId();
-			await withLock(replacement, () => createRamble(replacement, body));
+				const copies = kept.length > 0 ? kept : [wholeRambleCopy(current.body)];
+				const createdAt = now();
 
-			return replacement;
+				await Promise.all(
+					copies.map(async (copy) => {
+						const thought = {
+							id: newThoughtId(),
+							rambleId: id,
+							publication,
+							createdAt,
+							deleted: false,
+							...copy
+						};
+
+						if (!(await retryRateLimited(() => store.createThought(thought)))) {
+							throw new Error(`thought ${thought.id} already exists`);
+						}
+					})
+				);
+
+				const committed = await retryRateLimited(() =>
+					store.replaceRamble(advance(current, { status: 'split', publication }), current.revision)
+				);
+
+				if (committed) return { kind: 'published', publication };
+				console.info(
+					`split ${id} (attempt ${attempt}): ramble changed meanwhile; reading it again`
+				);
+			}
+
+			return { kind: 'conflict' };
 		},
 
-		async endRamble(id: RambleId): Promise<void> {
-			await endIfOpen(id, false);
-			await splitOnce(id);
-		},
-
-		// Runs on page load: ends idle rambles now, and retries pending splits
-		// in the background.
-		async settleOnLoad(): Promise<void> {
-			const open = (await store.listRambles()).filter((r) => r.status === 'open');
-			await Promise.all(open.map((r) => endIfOpen(r.id, true)));
-			const ended = (await store.listRambles()).filter((r) => r.status === 'ended');
-			void Promise.all(ended.map((r) => splitOnce(r.id))).catch((error) =>
-				console.error('split retry failed', error)
-			);
-		},
-
-		async home(): Promise<{ draft: Ramble | null; thoughts: Thought[]; waiting: number }> {
-			const rambles = await store.listRambles();
-			const split = new Set(rambles.filter((r) => r.status === 'split').map((r) => r.id));
+		// Ends idle open rambles, then lists what the home page shows.
+		async home(): Promise<{
+			draft: Stored<Ramble> | null;
+			thoughts: Stored<Thought>[];
+			pending: PendingSplit[];
+		}> {
+			const [listed, thoughts] = await Promise.all([store.listRambles(), store.listThoughts()]);
+			const rambles = await Promise.all(listed.map(endIfIdle));
+			const byId = new Map(rambles.map((ramble) => [ramble.id, ramble]));
 
 			const draft =
 				rambles
 					.filter((r) => r.status === 'open')
 					.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())[0] ?? null;
 
-			const thoughts = (await store.listThoughts())
-				.filter((t) => split.has(t.rambleId))
+			const pending = rambles
+				.filter((r) => r.status === 'ended')
+				.sort((a, b) => a.id.localeCompare(b.id))
+				.map(({ id, body }) => ({ id, body }));
+
+			const published = thoughts
+				.filter((thought) => {
+					const ramble = byId.get(thought.rambleId);
+
+					return ramble !== undefined && isPublished(thought, ramble);
+				})
 				.sort(newestFirst);
 
-			const waiting = rambles.filter((r) => r.status === 'ended').length;
-
-			return { draft, thoughts, waiting };
+			return { draft, thoughts: published, pending };
 		},
 
-		async ramble(id: RambleId): Promise<{ ramble: Ramble; thoughts: Thought[] } | null> {
+		async ramble(
+			id: RambleId
+		): Promise<{ ramble: Stored<Ramble>; thoughts: Stored<Thought>[] } | null> {
 			const ramble = await store.readRamble(id);
 
-			if (!ramble) return null;
+			if (!ramble || ramble.status === 'discarded') return null;
 
 			const thoughts =
 				ramble.status === 'split'
-					? (await store.listThoughts()).filter((t) => t.rambleId === id).sort(newestFirst)
+					? (await store.listThoughts()).filter((t) => isPublished(t, ramble)).sort(newestFirst)
 					: [];
 
 			return { ramble, thoughts };
 		},
 
-		// Changes only the ramble; thoughts copied from it stay as they are.
-		editRamble({ id, body }: { id: RambleId; body: string }): Promise<boolean> {
-			return withLock(id, async () => {
-				const ramble = await store.readRamble(id);
+		// Changes only the ramble body; its status and thoughts stay as they are.
+		async editRamble({
+			id,
+			body,
+			base
+		}: {
+			id: RambleId;
+			body: string;
+			base: Revision;
+		}): Promise<EditResult> {
+			const ramble = await store.readRamble(id);
 
-				if (!ramble) return false;
-				await store.writeRamble({ ...ramble, body, updatedAt: now() });
+			if (!ramble || ramble.status === 'discarded') return 'missing';
 
-				return true;
-			});
+			if (ramble.revision !== base) return 'conflict';
+
+			const saved = await retryRateLimited(() =>
+				store.replaceRamble({ ...ramble, body, updatedAt: now() }, base)
+			);
+
+			return saved ? 'saved' : 'conflict';
 		},
 
-		async thought(id: ThoughtId): Promise<Thought | null> {
-			const thought = await store.readThought(id);
+		thought: publishedThought,
 
-			return thought && (await isPublished(thought)) ? thought : null;
-		},
+		editThought: ({
+			id,
+			base,
+			edit
+		}: {
+			id: ThoughtId;
+			base: Revision;
+			edit: Partial<ThoughtEdit>;
+		}) => replacePublishedThought(id, base, (thought) => ({ ...thought, ...edit })),
 
-		editThought(id: ThoughtId, edit: Partial<ThoughtEdit>): Promise<boolean> {
-			return withLock(id, async () => {
-				const thought = await store.readThought(id);
-
-				if (!thought || !(await isPublished(thought))) return false;
-				await store.writeThought({ ...thought, ...edit });
-
-				return true;
-			});
-		},
-
-		deleteThought(id: ThoughtId): Promise<boolean> {
-			return withLock(id, async () => {
-				const thought = await store.readThought(id);
-
-				if (!thought || !(await isPublished(thought))) return false;
-				await store.deleteThought(id);
-
-				return true;
-			});
-		}
+		deleteThought: ({ id, base }: { id: ThoughtId; base: Revision }) =>
+			replacePublishedThought(id, base, (thought) => ({ ...thought, deleted: true }))
 	};
 }

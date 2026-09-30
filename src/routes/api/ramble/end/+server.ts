@@ -6,11 +6,11 @@ import type { RequestHandler } from './$types';
 
 const endRequest = z.object({ id: rambleId });
 
-export const POST: RequestHandler = async ({ request }) => {
-	const parsed = endRequest.safeParse(await request.json().catch(() => null));
+// Replies with the ramble's text when the browser should split it now.
+export const POST: RequestHandler = async (event) => {
+	const parsed = endRequest.safeParse(await event.request.json().catch(() => null));
 
 	if (!parsed.success) error(400, 'Expected { id }');
-	await (await rambles()).endRamble(parsed.data.id);
 
-	return json({ ok: true });
+	return json({ toSplit: await rambles(event).endRamble(parsed.data.id) });
 };

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { parseRambleId, parseThoughtId } from '$lib/ids';
+import { parsePublicationId, parseRambleId, parseRevision, parseThoughtId } from '$lib/ids';
 import { TODO_STATES } from '$lib/domain';
 
 const brandedId = <Id>(parseId: (raw: string) => Id | null) =>
@@ -18,6 +18,10 @@ const brandedId = <Id>(parseId: (raw: string) => Id | null) =>
 export const rambleId = brandedId(parseRambleId);
 
 export const thoughtId = brandedId(parseThoughtId);
+
+export const publicationId = brandedId(parsePublicationId);
+
+export const revision = brandedId(parseRevision);
 
 export const todoState = z.enum(TODO_STATES);
 

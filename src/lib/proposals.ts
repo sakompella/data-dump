@@ -9,4 +9,6 @@ export const proposedThought = z.object({
 
 export type ProposedThought = z.output<typeof proposedThought>;
 
-export const MAX_PROPOSALS = 100;
+// Each thought is one R2 write, and a Workers Free request may make only 50
+// subrequests in total.
+export const MAX_PROPOSALS = 40;

@@ -1,10 +1,5 @@
 import type { TodoState } from '$lib/domain';
-
-export interface ProposedThought {
-	readonly label: string;
-	readonly text: string;
-	readonly todo: boolean;
-}
+import type { ProposedThought } from '$lib/proposals';
 
 export interface ThoughtCopy {
 	readonly label: string;

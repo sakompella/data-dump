@@ -1,47 +1,92 @@
 <script lang="ts">
-	let { data, form } = $props();
+	import { onMount } from 'svelte';
+	import { page } from '$app/state';
+	import type { ConnectionStatus } from '$lib/chatgpt/auth';
+	import { chatgptAuth } from '$lib/split-client';
 
 	const STATUS_TEXT = {
-		connected: 'ChatGPT is connected. Rambles are split through it.',
+		connected: 'ChatGPT is connected. Rambles are split through it, from this browser.',
 		'not-connected': 'ChatGPT is not connected.',
 		'needs-reconnect': 'ChatGPT needs to be reconnected. Rambles wait until it is.'
 	} as const;
+
+	const auth = chatgptAuth();
+
+	let status = $state<ConnectionStatus>(auth.status());
+
+	let signInUrl = $state<string | null>(null);
+
+	let address = $state('');
+
+	let error = $state<string | null>(null);
+
+	let busy = $state(false);
+
+	async function reload() {
+		status = auth.status();
+		signInUrl = (await auth.pendingLogin())?.toString() ?? null;
+	}
+
+	async function start() {
+		error = null;
+		await auth.startLogin();
+		await reload();
+	}
+
+	async function complete(event: SubmitEvent) {
+		event.preventDefault();
+		busy = true;
+		const result = await auth.completeLogin(address);
+		busy = false;
+		error = result.ok ? null : result.error;
+
+		if (result.ok) address = '';
+		await reload();
+	}
+
+	async function disconnect() {
+		await auth.disconnect();
+		await reload();
+	}
+
+	onMount(() => void reload());
 </script>
 
 <svelte:head><title>ChatGPT · data-dump</title></svelte:head>
 
 <p><a href="/">← back</a></p>
 
-<p class:failed={data.status === 'needs-reconnect'}>{STATUS_TEXT[data.status]}</p>
-{#if data.modelMissing}
-	<p class="error">CHATGPT_MODEL is not set. Splitting through ChatGPT fails until it is.</p>
+<p class:failed={status === 'needs-reconnect'}>{STATUS_TEXT[status]}</p>
+{#if !page.data.chatgptModel}
+	<p class="error">
+		PUBLIC_CHATGPT_MODEL is not set. Rambles wait instead of being split until it is.
+	</p>
 {/if}
+<p class="meta">Your ChatGPT sign-in is kept in this browser only; the site never sees it.</p>
 
-{#if data.signInUrl}
-	<form method="POST" action="?/complete" class="edit">
+{#if signInUrl}
+	<form onsubmit={complete} class="edit">
 		<p>
-			1. <a href={data.signInUrl} target="_blank" rel="noopener noreferrer">Sign in with ChatGPT</a>
+			1. <a href={signInUrl} target="_blank" rel="noopener noreferrer">Sign in with ChatGPT</a>
 			(opens in a new tab).
 		</p>
 		<label>
 			2. After signing in, the browser lands on a page that does not load. Copy that page's full
 			address and paste it here.
-			<input name="address" placeholder={data.redirectUri} autocomplete="off" required />
+			<input bind:value={address} placeholder={auth.redirectUri} autocomplete="off" required />
 		</label>
-		<button>Connect</button>
-		{#if form?.error}<p class="error">{form.error}</p>{/if}
+		<button disabled={busy}>Connect</button>
+		{#if error}<p class="error">{error}</p>{/if}
 	</form>
-	<form method="POST" action="?/start">
-		<button>Start again</button>
-	</form>
+	<p><button type="button" onclick={start}>Start again</button></p>
 {:else}
-	<form method="POST" action="?/start">
-		<button>{data.status === 'not-connected' ? 'Connect' : 'Connect again'}</button>
-	</form>
+	<p>
+		<button type="button" onclick={start}>
+			{status === 'not-connected' ? 'Connect' : 'Connect again'}
+		</button>
+	</p>
 {/if}
 
-{#if data.status !== 'not-connected'}
-	<form method="POST" action="?/disconnect">
-		<button class="danger">Disconnect</button>
-	</form>
+{#if status !== 'not-connected'}
+	<p><button type="button" class="danger" onclick={disconnect}>Disconnect</button></p>
 {/if}

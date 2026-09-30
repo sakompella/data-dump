@@ -1,7 +1,6 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { copiesFromProposals, findSourcePassage } from './copies';
-import { parseModelContent } from './splitter';
 
 const ramble = `Rev keeps stalling on the deploy.
 I think the EA argument   was weaker than it sounded,
@@ -80,20 +79,5 @@ describe('copiesFromProposals', () => {
 				}
 			})
 		);
-	});
-});
-
-describe('parseModelContent', () => {
-	it('keeps well-formed items and ignores the rest', () => {
-		const content = JSON.stringify({
-			thoughts: [{ label: 'a', text: 'b', todo: true }, { label: 1 }, 'nope']
-		});
-
-		expect(parseModelContent(content)).toEqual([{ label: 'a', text: 'b', todo: true }]);
-	});
-
-	it('returns nothing for unusable output', () => {
-		expect(parseModelContent('not json')).toEqual([]);
-		expect(parseModelContent('{"items": []}')).toEqual([]);
 	});
 });

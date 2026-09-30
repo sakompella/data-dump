@@ -7,6 +7,12 @@ export type RambleId = Brand<string, 'RambleId'>;
 
 export type ThoughtId = Brand<string, 'ThoughtId'>;
 
+// Marks one finished split; only thoughts carrying the winning id are shown.
+export type PublicationId = Brand<string, 'PublicationId'>;
+
+// The storage ETag a reader saw. Writes are conditional on it.
+export type Revision = Brand<string, 'Revision'>;
+
 const ID_PATTERN = /^[0-9a-z]{9}-[0-9a-z]{8}$/;
 
 let lastMillis = 0;
@@ -30,6 +36,9 @@ export const newRambleId = (): RambleId => newId() as RambleId;
 // SAFETY: newId() always returns a fresh string matching ID_PATTERN.
 export const newThoughtId = (): ThoughtId => newId() as ThoughtId;
 
+// SAFETY: newId() always returns a fresh string matching ID_PATTERN.
+export const newPublicationId = (): PublicationId => newId() as PublicationId;
+
 export const parseRambleId = (raw: string): RambleId | null =>
 	// SAFETY: the brand is applied only after raw matches ID_PATTERN.
 	ID_PATTERN.test(raw) ? (raw as RambleId) : null;
@@ -37,3 +46,13 @@ export const parseRambleId = (raw: string): RambleId | null =>
 export const parseThoughtId = (raw: string): ThoughtId | null =>
 	// SAFETY: the brand is applied only after raw matches ID_PATTERN.
 	ID_PATTERN.test(raw) ? (raw as ThoughtId) : null;
+
+export const parsePublicationId = (raw: string): PublicationId | null =>
+	// SAFETY: the brand is applied only after raw matches ID_PATTERN.
+	ID_PATTERN.test(raw) ? (raw as PublicationId) : null;
+
+const REVISION_PATTERN = /^[0-9A-Za-z-]{1,128}$/;
+
+export const parseRevision = (raw: string): Revision | null =>
+	// SAFETY: the brand is applied only after raw matches REVISION_PATTERN.
+	REVISION_PATTERN.test(raw) ? (raw as Revision) : null;

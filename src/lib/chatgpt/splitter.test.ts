@@ -206,7 +206,7 @@ describe('parseModelContent', () => {
 	it('drops oversized items and caps the count so the server accepts the list', () => {
 		const item = { label: 'a', text: 'b', todo: false };
 		const huge = { ...item, text: 'x'.repeat(20_001) };
-		const content = JSON.stringify({ thoughts: [huge, ...Array(150).fill(item)] });
-		expect(parseModelContent(content)).toEqual(Array(100).fill(item));
+		const content = JSON.stringify({ thoughts: [huge, ...Array(60).fill(item)] });
+		expect(parseModelContent(content)).toEqual(Array(40).fill(item));
 	});
 });

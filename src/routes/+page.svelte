@@ -1,8 +1,23 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
+	import { invalidateAll } from '$app/navigation';
 	import Capture from '$lib/Capture.svelte';
+	import { splitRamble } from '$lib/split-client';
 	import ThoughtCard from '$lib/ThoughtCard.svelte';
 
-	let { data } = $props();
+	let { data, form } = $props();
+
+	// Rambles still waiting from earlier are split one at a time.
+	onMount(() => {
+		const waiting = data.pending;
+
+		if (waiting.length === 0) return;
+
+		void (async () => {
+			for (const ramble of waiting) await splitRamble({ ramble, model: data.chatgptModel });
+			await invalidateAll();
+		})();
+	});
 
 	const openTodos = $derived(data.thoughts.filter((t) => t.todo === 'open'));
 
@@ -11,12 +26,17 @@
 
 <svelte:head><title>data-dump</title></svelte:head>
 
-<Capture draft={data.draft} />
+<Capture draft={data.draft} model={data.chatgptModel} />
 
-{#if data.waiting > 0}
+{#if data.pending.length > 0}
 	<p class="waiting">
-		{data.waiting === 1 ? '1 ramble is' : `${data.waiting} rambles are`} waiting to be split.
+		{data.pending.length === 1 ? '1 ramble is' : `${data.pending.length} rambles are`} waiting to be
+		split.
 	</p>
+{/if}
+
+{#if form?.conflict}
+	<p class="error">That thought changed elsewhere. Reload to see the latest.</p>
 {/if}
 
 <section>

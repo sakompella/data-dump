@@ -1,5 +1,5 @@
-import type { R2Bucket } from '@cloudflare/workers-types';
 import type { UserId } from '$lib/server/access';
+import type { DocumentBucket } from '$lib/server/store';
 
 declare global {
 	namespace App {
@@ -9,7 +9,9 @@ declare global {
 
 		interface Platform {
 			env: {
-				DATA: R2Bucket;
+				// The R2 bucket, typed as the subset the store uses. R2Bucket's own type
+				// names workers-types' Headers, which the DOM Headers type does not match.
+				DATA: DocumentBucket;
 				ACCESS_TEAM_DOMAIN?: string;
 				ACCESS_AUD?: string;
 				PUBLIC_CHATGPT_MODEL?: string;

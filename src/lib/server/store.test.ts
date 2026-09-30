@@ -1,7 +1,7 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { newRambleId, newThoughtId } from '$lib/ids';
-import { RAMBLE_STATUSES, TODO_STATES, type Ramble, type Thought } from '$lib/domain';
+import { newPublicationId, newRambleId, newThoughtId } from '$lib/ids';
+import { TODO_STATES, type Ramble, type RambleState, type Thought } from '$lib/domain';
 import { formatRamble, formatThought, parseRamble, parseThought } from './store';
 
 const awkwardText = fc.oneof(
@@ -14,21 +14,20 @@ const awkwardText = fc.oneof(
 		.map((parts) => parts.join(''))
 );
 
+const rambleState: fc.Arbitrary<RambleState> = fc.oneof(
+	fc.constantFrom<RambleState>({ status: 'open' }, { status: 'ended' }, { status: 'discarded' }),
+	fc.constant(null).map((): RambleState => ({ status: 'split', publication: newPublicationId() }))
+);
+
 const date = fc.date({ min: new Date(0), max: new Date(4e12), noInvalidDate: true });
 
 describe('frontmatter files', () => {
 	it('round-trip rambles', () => {
 		fc.assert(
-			fc.property(
-				fc.constantFrom(...RAMBLE_STATUSES),
-				date,
-				date,
-				awkwardText,
-				(status, createdAt, updatedAt, body) => {
-					const ramble: Ramble = { id: newRambleId(), status, createdAt, updatedAt, body };
-					expect(parseRamble(formatRamble(ramble))).toEqual(ramble);
-				}
-			)
+			fc.property(rambleState, date, date, awkwardText, (state, createdAt, updatedAt, body) => {
+				const ramble: Ramble = { id: newRambleId(), createdAt, updatedAt, body, ...state };
+				expect(parseRamble(formatRamble(ramble))).toEqual(ramble);
+			})
 		);
 	});
 
@@ -39,14 +38,17 @@ describe('frontmatter files', () => {
 				fc.constantFrom(...TODO_STATES),
 				date,
 				awkwardText,
-				(label, todo, createdAt, body) => {
+				fc.boolean(),
+				(label, todo, createdAt, body, deleted) => {
 					const thought: Thought = {
 						id: newThoughtId(),
 						rambleId: newRambleId(),
+						publication: newPublicationId(),
 						label,
 						todo,
 						createdAt,
-						body
+						body,
+						deleted
 					};
 
 					expect(parseThought(formatThought(thought))).toEqual(thought);
@@ -59,5 +61,6 @@ describe('frontmatter files', () => {
 		expect(parseRamble('no frontmatter')).toBeNull();
 		expect(parseRamble('---\nid: nope\nstatus: open\n---\nbody')).toBeNull();
 		expect(parseThought('---\n: : :\n---\n')).toBeNull();
+		expect(parseRamble('---\nid: 0000000aa-aaaaaaaa\nstatus: split\n---\n')).toBeNull();
 	});
 });

@@ -1,4 +1,6 @@
-import { chatgpt } from '$lib/server/app';
 import type { LayoutServerLoad } from './$types';
 
-export const load: LayoutServerLoad = async () => ({ chatgpt: await chatgpt().status() });
+// The browser splits rambles through ChatGPT, so it needs the model name.
+export const load: LayoutServerLoad = ({ platform }) => ({
+	chatgptModel: platform?.env.PUBLIC_CHATGPT_MODEL || null
+});

@@ -1,30 +1,11 @@
-import { join } from 'node:path';
-import { env } from '$env/dynamic/private';
-import { createChatGPTAuth, type ChatGPTAuth } from './chatgpt-auth';
+import type { RequestEvent } from '@sveltejs/kit';
 import { createRambleService, type RambleService } from './rambles';
-import { createSplitter } from './splitter';
 import { createStore } from './store';
 
-const dataDir = () => env.DATA_DIR || 'data';
+// Built per request: the bucket binding and the user both come with the request.
+export function rambles(event: Pick<RequestEvent, 'platform' | 'locals'>): RambleService {
+	if (!event.platform) throw new Error('Cloudflare bindings are missing: no platform.env');
+	const store = createStore({ bucket: event.platform.env.DATA, userId: event.locals.userId });
 
-let auth: ChatGPTAuth | undefined;
-
-let service: Promise<RambleService> | undefined;
-
-export function chatgpt(): ChatGPTAuth {
-	auth ??= createChatGPTAuth({ dir: join(dataDir(), 'auth') });
-
-	return auth;
-}
-
-// Built on first use so env is read at runtime, not during `vite build`.
-export function rambles(): Promise<RambleService> {
-	service ??= (async () => {
-		const store = createStore(dataDir());
-		await store.init();
-
-		return createRambleService({ store, split: createSplitter({ env, chatgpt: chatgpt() }) });
-	})();
-
-	return service;
+	return createRambleService({ store });
 }

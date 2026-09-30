@@ -1,16 +1,18 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { newRambleId } from '$lib/ids';
+import { newPublicationId, newRambleId } from '$lib/ids';
 import { IDLE_GAP_MS, isIdle } from '$lib/idle';
-import { advance, canAdvance, RAMBLE_STATUSES, type Ramble } from './domain';
+import { advance, canAdvance, RAMBLE_STATUSES, type Ramble, type RambleState } from './domain';
 
-const ramble = (status: Ramble['status']): Ramble => ({
+const ramble = (state: RambleState): Ramble => ({
 	id: newRambleId(),
-	status,
 	createdAt: new Date(0),
 	updatedAt: new Date(0),
-	body: 'text'
+	body: 'text',
+	...state
 });
+
+const split: RambleState = { status: 'split', publication: newPublicationId() };
 
 describe('ramble lifecycle', () => {
 	it('only moves one step forward', () => {
@@ -18,14 +20,16 @@ describe('ramble lifecycle', () => {
 			RAMBLE_STATUSES.filter((to) => canAdvance(from, to)).map((to) => `${from}->${to}`)
 		);
 
-		expect(allowed).toEqual(['open->ended', 'ended->split']);
+		expect(allowed).toEqual(['open->ended', 'open->discarded', 'ended->split']);
 	});
 
 	it('refuses to move backward or skip', () => {
-		expect(() => advance(ramble('split'), 'open')).toThrow();
-		expect(() => advance(ramble('ended'), 'open')).toThrow();
-		expect(() => advance(ramble('open'), 'split')).toThrow();
-		expect(advance(ramble('open'), 'ended').status).toBe('ended');
+		expect(() => advance(ramble(split), { status: 'open' })).toThrow();
+		expect(() => advance(ramble({ status: 'ended' }), { status: 'open' })).toThrow();
+		expect(() => advance(ramble({ status: 'open' }), split)).toThrow();
+		expect(() => advance(ramble({ status: 'discarded' }), { status: 'ended' })).toThrow();
+		expect(advance(ramble({ status: 'open' }), { status: 'ended' }).status).toBe('ended');
+		expect(advance(ramble({ status: 'ended' }), split)).toMatchObject(split);
 	});
 });
 

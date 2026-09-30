@@ -2,14 +2,17 @@ import { error, fail, redirect } from '@sveltejs/kit';
 import { z } from 'zod';
 import { parseThoughtId } from '$lib/ids';
 import { rambles } from '$lib/server/app';
-import { formText, todoState } from '$lib/server/schemas';
+import { formText, revision, todoState } from '$lib/server/schemas';
 import type { Actions, PageServerLoad } from './$types';
 
 const thoughtEdit = z.object({
 	label: formText.pipe(z.string().trim()),
 	body: formText,
-	todo: todoState
+	todo: todoState,
+	revision
 });
+
+const thoughtDelete = z.object({ revision });
 
 function thoughtIdFrom(params: { id: string }) {
 	const id = parseThoughtId(params.id);
@@ -19,8 +22,8 @@ function thoughtIdFrom(params: { id: string }) {
 	return id;
 }
 
-export const load: PageServerLoad = async ({ params }) => {
-	const thought = await (await rambles()).thought(thoughtIdFrom(params));
+export const load: PageServerLoad = async (event) => {
+	const thought = await rambles(event).thought(thoughtIdFrom(event.params));
 
 	if (!thought) error(404, 'No such thought');
 
@@ -28,18 +31,35 @@ export const load: PageServerLoad = async ({ params }) => {
 };
 
 export const actions = {
-	save: async ({ params, request }) => {
-		const edit = thoughtEdit.safeParse(Object.fromEntries(await request.formData()));
+	save: async (event) => {
+		const parsed = thoughtEdit.safeParse(Object.fromEntries(await event.request.formData()));
 
-		if (!edit.success) return fail(400, { invalid: true });
-		const found = await (await rambles()).editThought(thoughtIdFrom(params), edit.data);
+		if (!parsed.success) return fail(400, { invalid: true });
+		const { revision: base, ...edit } = parsed.data;
 
-		if (!found) error(404, 'No such thought');
+		const result = await rambles(event).editThought({
+			id: thoughtIdFrom(event.params),
+			base,
+			edit
+		});
+
+		if (result === 'missing') error(404, 'No such thought');
+
+		if (result === 'conflict') return fail(409, { conflict: true, edit });
 
 		return { saved: true };
 	},
-	delete: async ({ params }) => {
-		await (await rambles()).deleteThought(thoughtIdFrom(params));
+	delete: async (event) => {
+		const parsed = thoughtDelete.safeParse(Object.fromEntries(await event.request.formData()));
+
+		if (!parsed.success) return fail(400, { invalid: true });
+
+		const result = await rambles(event).deleteThought({
+			id: thoughtIdFrom(event.params),
+			base: parsed.data.revision
+		});
+
+		if (result === 'conflict') return fail(409, { conflict: true });
 		redirect(303, '/');
 	}
 } satisfies Actions;

@@ -1,8 +1,12 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import type { Thought } from '$lib/domain';
+	import type { Revision } from '$lib/ids';
 
-	let { thought, showRambleLink = true }: { thought: Thought; showRambleLink?: boolean } = $props();
+	let {
+		thought,
+		showRambleLink = true
+	}: { thought: Thought & { revision: Revision }; showRambleLink?: boolean } = $props();
 </script>
 
 <article class="thought">
@@ -10,6 +14,7 @@
 		{#if thought.todo !== 'none'}
 			<form method="POST" action="/?/toggle" use:enhance>
 				<input type="hidden" name="id" value={thought.id} />
+				<input type="hidden" name="revision" value={thought.revision} />
 				<input
 					type="checkbox"
 					name="done"
