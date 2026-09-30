@@ -97,7 +97,7 @@ export function createStore(dataDir: string) {
 		try {
 			text = await readFile(path, 'utf8');
 		} catch (error) {
-			if (isMissingFile(error)) return null;
+			if (missingFileError.safeParse(error).success) return null;
 			throw error;
 		}
 
@@ -132,5 +132,4 @@ export function createStore(dataDir: string) {
 	};
 }
 
-const isMissingFile = (error: unknown): boolean =>
-	error instanceof Error && 'code' in error && error.code === 'ENOENT';
+const missingFileError = z.object({ code: z.literal('ENOENT') });

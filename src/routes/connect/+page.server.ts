@@ -1,5 +1,6 @@
 import { env } from '$env/dynamic/private';
 import { fail, redirect } from '@sveltejs/kit';
+import { z } from 'zod';
 import { chatgpt } from '$lib/server/app';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -21,10 +22,10 @@ export const actions = {
 		redirect(303, '/connect');
 	},
 	complete: async ({ request }) => {
-		const address = (await request.formData()).get('address');
+		const address = z.string().safeParse((await request.formData()).get('address'));
 
-		if (typeof address !== 'string') return fail(400, { error: 'Paste the full address.' });
-		const result = await chatgpt().completeLogin(address);
+		if (!address.success) return fail(400, { error: 'Paste the full address.' });
+		const result = await chatgpt().completeLogin(address.data);
 
 		if (!result.ok) return fail(400, { error: result.error });
 		redirect(303, '/connect');

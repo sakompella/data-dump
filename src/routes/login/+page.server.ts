@@ -1,5 +1,6 @@
 import { env } from '$env/dynamic/private';
 import { fail, redirect } from '@sveltejs/kit';
+import { z } from 'zod';
 import { isValidSession, SESSION_COOKIE, sessionToken } from '$lib/server/auth';
 import type { Actions } from './$types';
 
@@ -10,8 +11,8 @@ export const actions = {
 		const password = env.APP_PASSWORD;
 
 		if (!password) redirect(303, '/');
-		const attempt = (await request.formData()).get('password');
-		const token = typeof attempt === 'string' ? sessionToken(attempt) : undefined;
+		const attempt = z.string().safeParse((await request.formData()).get('password'));
+		const token = attempt.success ? sessionToken(attempt.data) : undefined;
 
 		if (!isValidSession(password, token)) return fail(400, { wrong: true });
 		cookies.set(SESSION_COOKIE, sessionToken(password), {

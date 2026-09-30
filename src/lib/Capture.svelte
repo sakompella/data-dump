@@ -3,12 +3,17 @@
 	import { invalidateAll } from '$app/navigation';
 	import { newRambleId, parseRambleId, type RambleId } from '$lib/ids';
 	import { IDLE_GAP_MS } from '$lib/idle';
+	import { z } from 'zod';
 
 	type Draft = { id: RambleId; body: string };
 
 	type SaveStatus = 'empty' | 'saving' | 'saved' | 'failed';
 
 	let { draft }: { draft: (Draft & { updatedAt: Date }) | null } = $props();
+
+	const backupSchema = z.object({ id: z.string(), body: z.string() });
+
+	const saveReplySchema = z.object({ id: z.string() });
 
 	const BACKUP_KEY = 'data-dump:draft';
 
@@ -46,14 +51,12 @@
 
 	function readBackup(): Draft | null {
 		try {
-			const raw: unknown = JSON.parse(localStorage.getItem(BACKUP_KEY) ?? 'null');
+			const backup = backupSchema.safeParse(JSON.parse(localStorage.getItem(BACKUP_KEY) ?? 'null'));
 
-			if (typeof raw !== 'object' || raw === null) return null;
+			if (!backup.success) return null;
+			const backupId = parseRambleId(backup.data.id);
 
-			if (!('id' in raw && 'body' in raw) || typeof raw.id !== 'string') return null;
-			const backupId = parseRambleId(raw.id);
-
-			return backupId && typeof raw.body === 'string' ? { id: backupId, body: raw.body } : null;
+			return backupId ? { id: backupId, body: backup.data.body } : null;
 		} catch {
 			return null;
 		}
@@ -72,12 +75,9 @@
 				body: JSON.stringify({ id: target.id, body: target.body })
 			});
 
-			const reply: unknown = response.ok ? await response.json() : null;
+			const reply = saveReplySchema.safeParse(response.ok ? await response.json() : null);
 
-			const savedId =
-				typeof reply === 'object' && reply !== null && 'id' in reply && typeof reply.id === 'string'
-					? parseRambleId(reply.id)
-					: null;
+			const savedId = reply.success ? parseRambleId(reply.data.id) : null;
 
 			if (savedId === null) throw new Error(`save failed with status ${response.status}`);
 
