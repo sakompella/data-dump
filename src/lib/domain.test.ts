@@ -17,6 +17,7 @@ describe('ramble lifecycle', () => {
 		const allowed = RAMBLE_STATUSES.flatMap((from) =>
 			RAMBLE_STATUSES.filter((to) => canAdvance(from, to)).map((to) => `${from}->${to}`)
 		);
+
 		expect(allowed).toEqual(['open->ended', 'ended->split']);
 	});
 

@@ -5,6 +5,7 @@
 	let { data } = $props();
 
 	const openTodos = $derived(data.thoughts.filter((t) => t.todo === 'open'));
+
 	const doneTodos = $derived(data.thoughts.filter((t) => t.todo === 'done'));
 </script>
 

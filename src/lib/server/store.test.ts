@@ -13,6 +13,7 @@ const awkwardText = fc.oneof(
 		})
 		.map((parts) => parts.join(''))
 );
+
 const date = fc.date({ min: new Date(0), max: new Date(4e12), noInvalidDate: true });
 
 describe('frontmatter files', () => {
@@ -47,6 +48,7 @@ describe('frontmatter files', () => {
 						createdAt,
 						body
 					};
+
 					expect(parseThought(formatThought(thought))).toEqual(thought);
 				}
 			)

@@ -12,6 +12,7 @@ import { createSplitter } from './splitter';
 import { createStore } from './store';
 
 const BODY = 'Rev keeps stalling. maybe email Michael about Friday';
+
 const ANSWER = JSON.stringify({
 	thoughts: [
 		{ label: 'Rev', text: 'Rev keeps stalling.', todo: false },
@@ -22,19 +23,25 @@ const ANSWER = JSON.stringify({
 // One local server playing both auth.openai.com and api.openai.com.
 function fakeOpenAI() {
 	const challenges = new Map<string, string>();
+
 	const state = {
 		issued: 0,
 		refreshRefused: false,
 		rejectNextApiCall: false,
 		apiTokens: [] as string[]
 	};
+
 	const readBody = async (request: IncomingMessage) => {
 		let text = '';
+
 		for await (const chunk of request) text += chunk;
+
 		return text;
 	};
+
 	const grant = () => {
 		state.issued += 1;
+
 		return {
 			access_token: `access-${state.issued}`,
 			refresh_token: `refresh-${state.issued}`,
@@ -43,8 +50,10 @@ function fakeOpenAI() {
 			scope: 'openid offline_access resource.invoke chatgpt.tokens.use.direct'
 		};
 	};
+
 	const server = createServer(async (request, response) => {
 		const url = new URL(request.url ?? '/', 'http://fake');
+
 		if (url.pathname === '/api/accounts/authorize') {
 			const code = `code-${challenges.size}`;
 			challenges.set(code, url.searchParams.get('code_challenge') ?? '');
@@ -55,10 +64,13 @@ function fakeOpenAI() {
 				client_id: 'issued-client'
 			}).toString();
 			response.writeHead(302, { location: back.toString() }).end();
+
 			return;
 		}
+
 		if (url.pathname === '/api/accounts/oauth/token') {
 			const form = new URLSearchParams(await readBody(request));
+
 			const ok =
 				form.get('client_id') === 'issued-client' &&
 				form.get('resource') === 'https://api.openai.com/v1' &&
@@ -67,20 +79,27 @@ function fakeOpenAI() {
 							.update(form.get('code_verifier') ?? '')
 							.digest('base64url') === challenges.get(form.get('code') ?? '')
 					: form.get('refresh_token') === `refresh-${state.issued}` && !state.refreshRefused);
+
 			response.writeHead(ok ? 200 : 400, { 'content-type': 'application/json' });
 			response.end(JSON.stringify(ok ? grant() : { error: 'invalid_grant' }));
+
 			return;
 		}
+
 		if (url.pathname === '/v1/responses') {
 			await readBody(request);
 			const token = request.headers.authorization ?? '';
 			state.apiTokens.push(token);
+
 			if (state.rejectNextApiCall || token !== `Bearer access-${state.issued}`) {
 				state.rejectNextApiCall = false;
 				response.writeHead(401).end();
+
 				return;
 			}
+
 			response.writeHead(200, { 'content-type': 'text/event-stream' });
+
 			const events = [
 				...ANSWER.match(/.{1,9}/gs)!.map((delta) => ({
 					type: 'response.output_text.delta',
@@ -88,19 +107,27 @@ function fakeOpenAI() {
 				})),
 				{ type: 'response.completed', response: {} }
 			];
+
 			const text = events.map((event) => `data: ${JSON.stringify(event)}\r\n\r\n`).join('');
+
 			for (let i = 0; i < text.length; i += 17) response.write(text.slice(i, i + 17));
 			response.end('data: [DONE]\r\n\r\n');
+
 			return;
 		}
+
 		response.writeHead(404).end();
 	});
+
 	return { server, state };
 }
 
 let dataDir: string;
+
 let server: Server;
+
 let fake: ReturnType<typeof fakeOpenAI>;
+
 let base: string;
 
 beforeEach(async () => {
@@ -118,18 +145,22 @@ afterEach(async () => {
 
 it('connects, splits, refreshes, and waits when ChatGPT needs a reconnect', async () => {
 	let clock = new Date('2026-01-01T00:00:00Z');
+
 	const auth = createChatGPTAuth({
 		dir: join(dataDir, 'auth'),
 		now: () => clock,
 		authBaseUrl: base
 	});
+
 	const store = createStore(dataDir);
 	await store.init();
+
 	const split = createSplitter({
 		env: { CHATGPT_MODEL: 'gpt-test' },
 		chatgpt: auth,
 		chatgptApiBaseUrl: `${base}/v1`
 	});
+
 	const service = createRambleService({ store, split });
 
 	const signIn = await auth.startLogin();

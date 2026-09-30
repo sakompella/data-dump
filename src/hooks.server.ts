@@ -12,6 +12,7 @@ export const init: ServerInit = () => {
 
 export const handle: Handle = async ({ event, resolve }) => {
 	const password = env.APP_PASSWORD;
+
 	if (
 		!password ||
 		event.url.pathname === '/login' ||
@@ -19,8 +20,10 @@ export const handle: Handle = async ({ event, resolve }) => {
 	) {
 		return resolve(event);
 	}
+
 	if (event.url.pathname.startsWith('/api/')) {
 		return new Response('Unauthorized', { status: 401 });
 	}
+
 	redirect(303, '/login');
 };

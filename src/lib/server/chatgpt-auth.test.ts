@@ -11,7 +11,9 @@ import {
 } from './chatgpt-auth';
 
 const AUTH = 'https://auth.test';
+
 const REDIRECT = 'http://127.0.0.1:1455/auth/callback';
+
 const HOUR_S = 3600;
 
 const pending: PendingLogin = {
@@ -21,10 +23,12 @@ const pending: PendingLogin = {
 	redirectUri: REDIRECT,
 	createdAt: new Date('2026-01-01T00:00:00Z')
 };
+
 const justAfter = new Date(pending.createdAt.getTime() + 1000);
 
 const callback = (params: Record<string, string>, base = REDIRECT) =>
 	`${base}?${new URLSearchParams(params)}`;
+
 const goodParams = { code: 'the-code', state: 'the-state', client_id: 'issued-client' };
 
 describe('parseCallbackUrl', () => {
@@ -84,14 +88,18 @@ type TokenReply = { status: number; json?: unknown };
 // Fake token endpoint. Each request takes the next reply; fields are recorded.
 function fakeTokenServer(replies: TokenReply[]) {
 	const requests: URLSearchParams[] = [];
+
 	const fetch: typeof globalThis.fetch = async (input, init) => {
 		expect(String(input)).toBe(`${AUTH}/api/accounts/oauth/token`);
 		requests.push(new URLSearchParams(String(init?.body)));
 		await new Promise((resolve) => setTimeout(resolve, 5));
 		const reply = replies.shift();
+
 		if (!reply) throw new Error('unexpected token request');
+
 		return new Response(JSON.stringify(reply.json ?? {}), { status: reply.status });
 	};
+
 	return { fetch, requests };
 }
 
@@ -107,14 +115,18 @@ const grant = (n: number, extra: Record<string, unknown> = {}): TokenReply => ({
 });
 
 let dir: string;
+
 let clock: Date;
+
 const now = () => clock;
+
 const advance = (ms: number) => (clock = new Date(clock.getTime() + ms));
 
 beforeEach(async () => {
 	dir = join(await mkdtemp(join(tmpdir(), 'data-dump-auth-')), 'auth');
 	clock = new Date('2026-01-01T00:00:00Z');
 });
+
 afterEach(() => rm(join(dir, '..'), { recursive: true, force: true }));
 
 async function connect(replies: TokenReply[]) {
@@ -124,6 +136,7 @@ async function connect(replies: TokenReply[]) {
 	const state = url.searchParams.get('state') ?? '';
 	const result = await auth.completeLogin(callback({ ...goodParams, state }));
 	expect(result).toEqual({ ok: true });
+
 	return { auth, server, url };
 }
 
@@ -252,9 +265,11 @@ describe('refresh', () => {
 
 	it('refreshes once after concurrent rejections of the same token', async () => {
 		const { auth, server } = await connect([grant(2)]);
+
 		const tokens = await Promise.all(
 			Array.from({ length: 3 }, () => auth.accessTokenAfterRejection('access-1'))
 		);
+
 		expect(tokens).toEqual(Array(3).fill('access-2'));
 		expect(server.requests).toHaveLength(2);
 	});

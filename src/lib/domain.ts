@@ -4,9 +4,11 @@ export type { RambleId, ThoughtId };
 
 // open: still being written; ended: waiting for split; split: thoughts copied.
 export const RAMBLE_STATUSES = ['open', 'ended', 'split'] as const;
+
 export type RambleStatus = (typeof RAMBLE_STATUSES)[number];
 
 export const TODO_STATES = ['none', 'open', 'done'] as const;
+
 export type TodoState = (typeof TODO_STATES)[number];
 
 export interface Ramble {
@@ -39,5 +41,6 @@ export function advance(ramble: Ramble, to: RambleStatus): Ramble {
 	if (!canAdvance(ramble.status, to)) {
 		throw new Error(`ramble ${ramble.id}: cannot go from ${ramble.status} to ${to}`);
 	}
+
 	return { ...ramble, status: to };
 }

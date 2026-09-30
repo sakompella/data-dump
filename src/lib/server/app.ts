@@ -8,10 +8,12 @@ import { createStore } from './store';
 const dataDir = () => env.DATA_DIR || 'data';
 
 let auth: ChatGPTAuth | undefined;
+
 let service: Promise<RambleService> | undefined;
 
 export function chatgpt(): ChatGPTAuth {
 	auth ??= createChatGPTAuth({ dir: join(dataDir(), 'auth') });
+
 	return auth;
 }
 
@@ -20,7 +22,9 @@ export function rambles(): Promise<RambleService> {
 	service ??= (async () => {
 		const store = createStore(dataDir());
 		await store.init();
+
 		return createRambleService({ store, split: createSplitter({ env, chatgpt: chatgpt() }) });
 	})();
+
 	return service;
 }

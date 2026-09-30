@@ -6,6 +6,7 @@ import type { Actions, PageServerLoad } from './$types';
 export const load: PageServerLoad = async () => {
 	const auth = chatgpt();
 	const status = await auth.status();
+
 	return {
 		status,
 		signInUrl: (await auth.pendingLogin())?.toString() ?? null,
@@ -21,8 +22,10 @@ export const actions = {
 	},
 	complete: async ({ request }) => {
 		const address = (await request.formData()).get('address');
+
 		if (typeof address !== 'string') return fail(400, { error: 'Paste the full address.' });
 		const result = await chatgpt().completeLogin(address);
+
 		if (!result.ok) return fail(400, { error: result.error });
 		redirect(303, '/connect');
 	},

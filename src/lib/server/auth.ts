@@ -9,5 +9,6 @@ export function isValidSession(password: string, token: string | undefined): boo
 	if (!token) return false;
 	const expected = Buffer.from(sessionToken(password));
 	const given = Buffer.from(token);
+
 	return given.length === expected.length && timingSafeEqual(given, expected);
 }

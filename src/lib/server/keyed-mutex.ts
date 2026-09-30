@@ -6,6 +6,7 @@ export function createKeyedMutex() {
 		const previous = tails.get(key) ?? Promise.resolve();
 		const result = previous.catch(() => undefined).then(work);
 		tails.set(key, result);
+
 		try {
 			return await result;
 		} finally {

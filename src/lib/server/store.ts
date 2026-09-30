@@ -44,8 +44,10 @@ export function formatRamble(ramble: Ramble): string {
 export function parseRamble(text: string): Ramble | null {
 	const doc = parseDocument(text);
 	const meta = doc && rambleMeta.safeParse(doc.data);
+
 	if (!doc || !meta?.success) return null;
 	const { id, status, created, updated } = meta.data;
+
 	return { id, status, createdAt: created, updatedAt: updated, body: doc.body };
 }
 
@@ -65,8 +67,10 @@ export function formatThought(thought: Thought): string {
 export function parseThought(text: string): Thought | null {
 	const doc = parseDocument(text);
 	const meta = doc && thoughtMeta.safeParse(doc.data);
+
 	if (!doc || !meta?.success) return null;
 	const { id, ramble, label, todo, created } = meta.data;
+
 	return { id, rambleId: ramble, label, todo, createdAt: created, body: doc.body };
 }
 
@@ -89,20 +93,25 @@ export function createStore(dataDir: string) {
 		parse: (text: string) => T | null
 	): Promise<T | null> {
 		let text: string;
+
 		try {
 			text = await readFile(path, 'utf8');
 		} catch (error) {
 			if (isMissingFile(error)) return null;
 			throw error;
 		}
+
 		const parsed = parse(text);
+
 		if (!parsed) console.warn(`store: skipping malformed file ${path}`);
+
 		return parsed;
 	}
 
 	async function readAll<T>(dir: string, parse: (text: string) => T | null): Promise<T[]> {
 		const names = (await readdir(dir)).filter((name) => name.endsWith('.md'));
 		const items = await Promise.all(names.map((name) => readOptional(join(dir, name), parse)));
+
 		return items.filter((item) => item !== null);
 	}
 

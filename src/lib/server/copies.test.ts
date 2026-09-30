@@ -19,6 +19,7 @@ describe('copiesFromProposals', () => {
 				todo: false
 			}
 		]);
+
 		expect(copies).toEqual([
 			{
 				label: 'EA argument',
@@ -35,6 +36,7 @@ describe('copiesFromProposals', () => {
 			{ label: 'blank', text: '  \n ', todo: false },
 			{ label: 'Michael', text: 'Email Michael about Friday', todo: true }
 		]);
+
 		expect(copies).toEqual([]);
 	});
 
@@ -60,15 +62,18 @@ describe('copiesFromProposals', () => {
 	it('only ever accepts substrings of the ramble', () => {
 		const words = fc.array(fc.constantFrom('a', 'b', 'c.', '(d)', '🙂', '*'), { maxLength: 8 });
 		const spacing = fc.constantFrom(' ', '  ', '\n', '\t');
+
 		const text = fc
 			.array(fc.tuple(words, spacing), { maxLength: 10 })
 			.map((parts) => parts.map(([w, s]) => w.join(' ') + s).join(''));
+
 		fc.assert(
 			fc.property(text, fc.array(text, { maxLength: 5 }), (body, proposals) => {
 				const copies = copiesFromProposals(
 					body,
 					proposals.map((p) => ({ label: '', text: p, todo: false }))
 				);
+
 				for (const copy of copies) {
 					expect(body).toContain(copy.body);
 					expect(copy.body.trim()).not.toBe('');
@@ -83,6 +88,7 @@ describe('parseModelContent', () => {
 		const content = JSON.stringify({
 			thoughts: [{ label: 'a', text: 'b', todo: true }, { label: 1 }, 'nope']
 		});
+
 		expect(parseModelContent(content)).toEqual([{ label: 'a', text: 'b', todo: true }]);
 	});
 

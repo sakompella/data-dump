@@ -9,6 +9,7 @@ import {
 } from './splitter';
 
 const API = 'https://api.test/v1';
+
 const encoder = new TextEncoder();
 
 const streamOf = (chunks: Uint8Array[]) =>
@@ -57,12 +58,15 @@ describe('collectOutputText', () => {
 					const comment = withComment ? `: ping${newline}` : '';
 					const done = withDone ? sseText(['[DONE]'], newline) : '';
 					const bytes = encoder.encode(comment + events + done);
+
 					const points = [...new Set(cuts.map((cut) => cut % (bytes.length + 1)))].sort(
 						(a, b) => a - b
 					);
+
 					const chunks = [0, ...points, bytes.length]
 						.slice(1)
 						.map((end, i, ends) => bytes.slice(i === 0 ? 0 : ends[i - 1], end));
+
 					expect(await collectOutputText(streamOf(chunks))).toBe(deltas.join(''));
 				}
 			)
@@ -82,6 +86,7 @@ describe('collectOutputText', () => {
 });
 
 const PROPOSALS: ProposedThought[] = [{ label: 'Rev', text: 'Rev keeps stalling.', todo: false }];
+
 const modelAnswer = JSON.stringify({ thoughts: PROPOSALS });
 
 type Call = { url: string; token: string | null; body: Record<string, unknown> };
@@ -89,6 +94,7 @@ type Call = { url: string; token: string | null; body: Record<string, unknown> }
 // Routes /responses to scripted statuses; other calls are recorded as chat completions.
 function fakeApi(statuses: number[]) {
 	const calls: Call[] = [];
+
 	const fetch: typeof globalThis.fetch = async (input, init) => {
 		const headers = new Headers(init?.headers);
 		calls.push({
@@ -96,21 +102,27 @@ function fakeApi(statuses: number[]) {
 			token: headers.get('authorization'),
 			body: JSON.parse(String(init?.body))
 		});
+
 		if (String(input).endsWith('/chat/completions')) {
 			return Response.json({ choices: [{ message: { content: modelAnswer } }] });
 		}
+
 		const status = statuses.shift() ?? 200;
+
 		if (status !== 200) return new Response('nope', { status });
 		const deltas = [modelAnswer.slice(0, 7), modelAnswer.slice(7)];
+
 		return new Response(sseText(deltaEvents(deltas)), {
 			headers: { 'content-type': 'text/event-stream' }
 		});
 	};
+
 	return { fetch, calls };
 }
 
 function fakeTokens(connected: boolean) {
 	const tokens = { current: 'token-1', refreshes: 0 };
+
 	return {
 		tokens,
 		chatgpt: {
@@ -121,6 +133,7 @@ function fakeTokens(connected: boolean) {
 					tokens.refreshes += 1;
 					tokens.current = `token-${tokens.refreshes + 1}`;
 				}
+
 				return tokens.current;
 			}
 		}
@@ -132,12 +145,14 @@ const env = { CHATGPT_MODEL: 'gpt-test', OPENAI_API_KEY: 'sk-key', OPENAI_MODEL:
 describe('createSplitter', () => {
 	it('prefers a connected ChatGPT account and sends only the fields it accepts', async () => {
 		const api = fakeApi([]);
+
 		const split = createSplitter({
 			env,
 			chatgpt: fakeTokens(true).chatgpt,
 			fetch: api.fetch,
 			chatgptApiBaseUrl: API
 		});
+
 		expect(await split('Rev keeps stalling.')).toEqual(PROPOSALS);
 		expect(api.calls).toHaveLength(1);
 		expect(api.calls[0].url).toBe(`${API}/responses`);
@@ -181,36 +196,42 @@ describe('createSplitter', () => {
 
 	it('rejects after a second 401', async () => {
 		const api = fakeApi([401, 401]);
+
 		const split = createSplitter({
 			env,
 			chatgpt: fakeTokens(true).chatgpt,
 			fetch: api.fetch,
 			chatgptApiBaseUrl: API
 		});
+
 		await expect(split('x')).rejects.toThrow();
 		expect(api.calls).toHaveLength(2);
 	});
 
 	it('retries a 5xx once, then rejects', async () => {
 		const api = fakeApi([503, 503]);
+
 		const split = createSplitter({
 			env,
 			chatgpt: fakeTokens(true).chatgpt,
 			fetch: api.fetch,
 			chatgptApiBaseUrl: API
 		});
+
 		await expect(split('x')).rejects.toThrow('503');
 		expect(api.calls).toHaveLength(2);
 	});
 
 	it('rejects a 4xx without retrying', async () => {
 		const api = fakeApi([400]);
+
 		const split = createSplitter({
 			env,
 			chatgpt: fakeTokens(true).chatgpt,
 			fetch: api.fetch,
 			chatgptApiBaseUrl: API
 		});
+
 		await expect(split('x')).rejects.toThrow('400');
 		expect(api.calls).toHaveLength(1);
 	});

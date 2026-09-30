@@ -21,8 +21,10 @@ export function findSourcePassage(
 	proposal: string
 ): { start: number; text: string } | null {
 	const tokens = proposal.split(/\s+/).filter((token) => token !== '');
+
 	if (tokens.length === 0) return null;
 	const match = new RegExp(tokens.map(escapeRegExp).join('\\s+')).exec(ramble);
+
 	return match ? { start: match.index, text: match[0] } : null;
 }
 
@@ -45,9 +47,11 @@ export function copiesFromProposals(
 	return proposals
 		.flatMap((proposal) => {
 			const passage = findSourcePassage(ramble, proposal.text);
+
 			if (!passage) return [];
 			const label = proposal.label.trim() || fallbackLabel(passage.text);
 			const todo: TodoState = proposal.todo ? 'open' : 'none';
+
 			return [{ start: passage.start, copy: { label, body: passage.text, todo } }];
 		})
 		.sort((a, b) => a.start - b.start)

@@ -10,13 +10,16 @@ import type { Splitter } from './splitter';
 import { createStore, type Store } from './store';
 
 const BODY = 'Rev keeps stalling. maybe email Michael about Friday';
+
 const PROPOSALS: ProposedThought[] = [
 	{ label: 'Rev', text: 'Rev keeps stalling.', todo: false },
 	{ label: 'Michael', text: 'maybe email Michael about Friday', todo: true }
 ];
 
 let dataDir: string;
+
 let store: Store;
+
 let splitCalls: number;
 
 beforeEach(async () => {
@@ -33,6 +36,7 @@ const countingSplitter =
 	async () => {
 		splitCalls += 1;
 		await new Promise((resolve) => setTimeout(resolve, 5));
+
 		return proposals;
 	};
 
@@ -81,6 +85,7 @@ describe('endRamble', () => {
 			store,
 			split: countingSplitter([{ label: 'x', text: 'a paraphrase', todo: true }])
 		});
+
 		const id = newRambleId();
 		await service.saveDraft({ id, body: BODY });
 		await service.endRamble(id);
@@ -96,13 +101,16 @@ describe('endRamble', () => {
 
 	it('leaves the ramble ended when the model call fails, and retries later', async () => {
 		let fail = true;
+
 		const service = createRambleService({
 			store,
 			split: async (body) => {
 				if (fail) throw new Error('503');
+
 				return countingSplitter(PROPOSALS)(body);
 			}
 		});
+
 		const id = newRambleId();
 		await service.saveDraft({ id, body: BODY });
 		await service.endRamble(id);
@@ -130,6 +138,7 @@ describe('endRamble', () => {
 		const id = newRambleId();
 		await service.saveDraft({ id, body: BODY });
 		const ramble = await store.readRamble(id);
+
 		if (!ramble) throw new Error('draft was not saved');
 		await store.writeRamble({ ...ramble, status: 'ended' });
 		await store.writeThought({
@@ -151,13 +160,16 @@ describe('endRamble', () => {
 
 	it('copies from the body as it was when the split started', async () => {
 		let editDuringSplit: () => Promise<unknown> = async () => undefined;
+
 		const service = createRambleService({
 			store,
 			split: async (body) => {
 				await editDuringSplit();
+
 				return countingSplitter(PROPOSALS)(body);
 			}
 		});
+
 		const id = newRambleId();
 		await service.saveDraft({ id, body: BODY });
 		const edited = 'Rewritten after ending.';
@@ -174,11 +186,13 @@ describe('endRamble', () => {
 describe('settleOnLoad', () => {
 	it('ends open rambles past the idle gap and keeps fresh ones open', async () => {
 		let clock = new Date('2026-01-01T00:00:00Z');
+
 		const service = createRambleService({
 			store,
 			split: countingSplitter(PROPOSALS),
 			now: () => clock
 		});
+
 		const stale = newRambleId();
 		await service.saveDraft({ id: stale, body: BODY });
 		clock = new Date(clock.getTime() + IDLE_GAP_MS + 1);
