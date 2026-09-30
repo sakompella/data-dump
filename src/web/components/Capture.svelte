@@ -93,6 +93,8 @@
 	// Captures that ended but could not be saved; the Retry button tries them again.
 	let failedEnds: Capture[] = [];
 
+	let earlierUnsaved = $state(0);
+
 	const endJobs = new Set<Promise<void>>();
 
 	let lastInputAt = Date.now();
@@ -231,6 +233,7 @@
 			// The capture's own text is saved first; `id` may have moved to a replacement ramble.
 			if (!(await save(capture)) || capture.id === null) {
 				failedEnds.push(capture);
+				earlierUnsaved = failedEnds.length;
 				status = 'failed';
 
 				return;
@@ -269,7 +272,10 @@
 	function retry() {
 		void save(current);
 
-		for (const capture of failedEnds.splice(0)) startEndJob(capture);
+		const again = failedEnds.splice(0);
+		earlierUnsaved = 0;
+
+		for (const capture of again) startEndJob(capture);
 	}
 
 	const isPastIdleGap = () => current.id !== null && Date.now() - lastInputAt > IDLE_GAP_MS;
@@ -404,7 +410,10 @@
 	<div class="capture-bar">
 		<button type="button" onclick={endCurrent}>New ramble</button>
 		<span class="status" class:failed={status === 'failed'}>{STATUS_TEXT[status]}</span>
-		{#if status === 'failed'}
+		{#if earlierUnsaved > 0}
+			<span class="status failed">unsaved text in an earlier ramble</span>
+		{/if}
+		{#if status === 'failed' || earlierUnsaved > 0}
 			<button type="button" class="small" onclick={retry}>Retry</button>
 		{/if}
 		{#if backupFailed}<span class="status failed">backup unavailable in this browser</span>{/if}
