@@ -1,29 +1,22 @@
-import { env } from '$env/dynamic/private';
-import { redirect, type Handle, type ServerInit } from '@sveltejs/kit';
-import { isValidSession, SESSION_COOKIE } from '$lib/server/auth';
-
-export const init: ServerInit = () => {
-	if (!env.APP_PASSWORD) {
-		console.warn(
-			'APP_PASSWORD is not set: anyone who can reach this server can read and edit everything.'
-		);
-	}
-};
+import { dev } from '$app/environment';
+import type { Handle } from '@sveltejs/kit';
+import { identify } from '$lib/server/access';
 
 export const handle: Handle = async ({ event, resolve }) => {
-	const password = env.APP_PASSWORD;
+	const identity = await identify({
+		dev,
+		env: event.platform?.env ?? {},
+		token: event.request.headers.get('cf-access-jwt-assertion')
+	});
 
-	if (
-		!password ||
-		event.url.pathname === '/login' ||
-		isValidSession(password, event.cookies.get(SESSION_COOKIE))
-	) {
-		return resolve(event);
+	if (!identity.ok) {
+		console.warn(`access denied: ${identity.reason}`);
+		const status = event.url.pathname.startsWith('/api/') ? 401 : 403;
+
+		return new Response(status === 401 ? 'Unauthorized' : 'Forbidden', { status });
 	}
 
-	if (event.url.pathname.startsWith('/api/')) {
-		return new Response('Unauthorized', { status: 401 });
-	}
+	event.locals.userId = identity.userId;
 
-	redirect(303, '/login');
+	return resolve(event);
 };

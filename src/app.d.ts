@@ -1,7 +1,12 @@
 import type { R2Bucket } from '@cloudflare/workers-types';
+import type { UserId } from '$lib/server/access';
 
 declare global {
 	namespace App {
+		interface Locals {
+			userId: UserId;
+		}
+
 		interface Platform {
 			env: {
 				DATA: R2Bucket;
