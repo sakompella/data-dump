@@ -236,7 +236,10 @@ describe('refresh', () => {
 			refresh_token: 'refresh-1',
 			resource: 'https://api.openai.com/v1'
 		});
-		expect(await readTokenFile()).toMatchObject({ accessToken: 'access-2', refreshToken: 'refresh-2' });
+		expect(await readTokenFile()).toMatchObject({
+			accessToken: 'access-2',
+			refreshToken: 'refresh-2'
+		});
 	});
 
 	it('refreshes once for concurrent callers', async () => {

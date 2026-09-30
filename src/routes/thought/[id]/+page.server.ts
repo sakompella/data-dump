@@ -5,7 +5,11 @@ import { rambles } from '$lib/server/app';
 import { formText, todoState } from '$lib/server/schemas';
 import type { Actions, PageServerLoad } from './$types';
 
-const thoughtEdit = z.object({ label: formText.pipe(z.string().trim()), body: formText, todo: todoState });
+const thoughtEdit = z.object({
+	label: formText.pipe(z.string().trim()),
+	body: formText,
+	todo: todoState
+});
 
 function thoughtIdFrom(params: { id: string }) {
 	const id = parseThoughtId(params.id);

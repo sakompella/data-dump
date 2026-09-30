@@ -144,9 +144,7 @@ const streamEvent = z.looseObject({ type: z.string() });
 const textDelta = z.object({ delta: z.string() });
 const failure = z.object({
 	message: z.string().optional(),
-	response: z
-		.object({ error: z.object({ message: z.string() }).nullish() })
-		.optional()
+	response: z.object({ error: z.object({ message: z.string() }).nullish() }).optional()
 });
 
 // Concatenates the output text deltas until the response finishes.

@@ -4,7 +4,9 @@ import { isValidSession, SESSION_COOKIE } from '$lib/server/auth';
 
 export const init: ServerInit = () => {
 	if (!env.APP_PASSWORD) {
-		console.warn('APP_PASSWORD is not set: anyone who can reach this server can read and edit everything.');
+		console.warn(
+			'APP_PASSWORD is not set: anyone who can reach this server can read and edit everything.'
+		);
 	}
 };
 

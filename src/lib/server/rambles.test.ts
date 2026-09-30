@@ -87,7 +87,11 @@ describe('endRamble', () => {
 
 		const thoughts = await store.listThoughts();
 		expect(thoughts).toHaveLength(1);
-		expect(thoughts[0]).toMatchObject({ body: BODY, todo: 'none', label: 'Rev keeps stalling. maybe email' });
+		expect(thoughts[0]).toMatchObject({
+			body: BODY,
+			todo: 'none',
+			label: 'Rev keeps stalling. maybe email'
+		});
 	});
 
 	it('leaves the ramble ended when the model call fails, and retries later', async () => {

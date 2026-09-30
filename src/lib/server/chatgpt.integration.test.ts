@@ -22,7 +22,12 @@ const ANSWER = JSON.stringify({
 // One local server playing both auth.openai.com and api.openai.com.
 function fakeOpenAI() {
 	const challenges = new Map<string, string>();
-	const state = { issued: 0, refreshRefused: false, rejectNextApiCall: false, apiTokens: [] as string[] };
+	const state = {
+		issued: 0,
+		refreshRefused: false,
+		rejectNextApiCall: false,
+		apiTokens: [] as string[]
+	};
 	const readBody = async (request: IncomingMessage) => {
 		let text = '';
 		for await (const chunk of request) text += chunk;
@@ -58,8 +63,9 @@ function fakeOpenAI() {
 				form.get('client_id') === 'issued-client' &&
 				form.get('resource') === 'https://api.openai.com/v1' &&
 				(form.get('grant_type') === 'authorization_code'
-					? createHash('sha256').update(form.get('code_verifier') ?? '').digest('base64url') ===
-						challenges.get(form.get('code') ?? '')
+					? createHash('sha256')
+							.update(form.get('code_verifier') ?? '')
+							.digest('base64url') === challenges.get(form.get('code') ?? '')
 					: form.get('refresh_token') === `refresh-${state.issued}` && !state.refreshRefused);
 			response.writeHead(ok ? 200 : 400, { 'content-type': 'application/json' });
 			response.end(JSON.stringify(ok ? grant() : { error: 'invalid_grant' }));
@@ -76,7 +82,10 @@ function fakeOpenAI() {
 			}
 			response.writeHead(200, { 'content-type': 'text/event-stream' });
 			const events = [
-				...ANSWER.match(/.{1,9}/gs)!.map((delta) => ({ type: 'response.output_text.delta', delta })),
+				...ANSWER.match(/.{1,9}/gs)!.map((delta) => ({
+					type: 'response.output_text.delta',
+					delta
+				})),
 				{ type: 'response.completed', response: {} }
 			];
 			const text = events.map((event) => `data: ${JSON.stringify(event)}\r\n\r\n`).join('');
@@ -109,7 +118,11 @@ afterEach(async () => {
 
 it('connects, splits, refreshes, and waits when ChatGPT needs a reconnect', async () => {
 	let clock = new Date('2026-01-01T00:00:00Z');
-	const auth = createChatGPTAuth({ dir: join(dataDir, 'auth'), now: () => clock, authBaseUrl: base });
+	const auth = createChatGPTAuth({
+		dir: join(dataDir, 'auth'),
+		now: () => clock,
+		authBaseUrl: base
+	});
 	const store = createStore(dataDir);
 	await store.init();
 	const split = createSplitter({

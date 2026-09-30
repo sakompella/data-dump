@@ -21,7 +21,10 @@ const streamOf = (chunks: Uint8Array[]) =>
 
 const sseText = (payloads: unknown[], newline = '\n') =>
 	payloads
-		.map((payload) => `data: ${typeof payload === 'string' ? payload : JSON.stringify(payload)}${newline}${newline}`)
+		.map(
+			(payload) =>
+				`data: ${typeof payload === 'string' ? payload : JSON.stringify(payload)}${newline}${newline}`
+		)
 		.join('');
 
 const deltaEvents = (deltas: string[]) => [

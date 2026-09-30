@@ -84,7 +84,10 @@ export function createStore(dataDir: string) {
 		await rename(temp, path);
 	}
 
-	async function readOptional<T>(path: string, parse: (text: string) => T | null): Promise<T | null> {
+	async function readOptional<T>(
+		path: string,
+		parse: (text: string) => T | null
+	): Promise<T | null> {
 		let text: string;
 		try {
 			text = await readFile(path, 'utf8');

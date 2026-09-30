@@ -59,7 +59,9 @@ export type ConnectionStatus = 'not-connected' | 'connected' | 'needs-reconnect'
 export class TokenServerUnavailable extends Error {}
 export class NotConnected extends Error {}
 
-export type CallbackResult = { ok: true; code: string; clientId: string } | { ok: false; error: string };
+export type CallbackResult =
+	| { ok: true; code: string; clientId: string }
+	| { ok: false; error: string };
 
 const isExpired = (pending: PendingLogin, now: Date) =>
 	now.getTime() - pending.createdAt.getTime() > PENDING_LOGIN_TTL_MS;
