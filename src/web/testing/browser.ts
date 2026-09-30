@@ -63,6 +63,14 @@ export function createFakeLockManager() {
 
 export const DEV_USER = 'me';
 
+// One request as the server saw it, with both bodies as text.
+export interface Exchange {
+	readonly method: string;
+	readonly path: string;
+	readonly sent: string;
+	readonly answered: string;
+}
+
 // A fetch that answers from the real Hono app and in-memory user data, as
 // `vite dev` does with DEV_USER_ID. `afterReply` runs once a request has been
 // answered and before the browser sees the reply.
@@ -70,7 +78,7 @@ export function createServedApp() {
 	const namespace = createFakeNamespace();
 	const app = createApp({ dev: true });
 	const env = { USER_DATA: namespace, DEV_USER_ID: DEV_USER };
-	let afterReply: (request: { method: string; path: string }) => Promise<void> = async () => {};
+	let afterReply: (exchange: Exchange) => Promise<void> = async () => {};
 
 	const fetch: typeof globalThis.fetch = async (input, init) => {
 		const url = new URL(
@@ -80,7 +88,12 @@ export function createServedApp() {
 
 		const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
 		const response = await app.request(url.pathname + url.search, { ...init, method }, env);
-		await afterReply({ method, path: url.pathname });
+		await afterReply({
+			method,
+			path: url.pathname,
+			sent: init?.body ? String(init.body) : '',
+			answered: await response.clone().text()
+		});
 
 		return response;
 	};
@@ -92,6 +105,49 @@ export function createServedApp() {
 			afterReply = hook;
 		},
 		close: () => namespace.close()
+	};
+}
+
+// A localStorage whose reads or writes fail on demand, like a full or
+// blocked browser store. Keys show up in Object.keys, as with the real one.
+export function createFlakyStorage() {
+	const items = new Map<string, string>();
+	let failWrite: (key: string) => boolean = () => false;
+	let failRead: (key: string) => boolean = () => false;
+
+	const refuse = (what: string) => {
+		throw new DOMException(`${what} refused`, 'QuotaExceededError');
+	};
+
+	const methods = {
+		getItem: (key: string) => (failRead(key) ? refuse('read') : (items.get(key) ?? null)),
+		setItem: (key: string, value: string) =>
+			failWrite(key) ? refuse('write') : void items.set(key, String(value)),
+		removeItem: (key: string) => void items.delete(key),
+		key: (index: number) => [...items.keys()][index] ?? null,
+		clear: () => items.clear(),
+		get length() {
+			return items.size;
+		}
+	};
+
+	const storage = new Proxy(methods, {
+		ownKeys: () => [...items.keys()],
+		getOwnPropertyDescriptor: (_target, key) =>
+			items.has(String(key))
+				? { value: items.get(String(key)), enumerable: true, configurable: true }
+				: undefined
+	});
+
+	return {
+		storage,
+		items,
+		failWrites(when: (key: string) => boolean) {
+			failWrite = when;
+		},
+		failReads(when: (key: string) => boolean) {
+			failRead = when;
+		}
 	};
 }
 
