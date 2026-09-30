@@ -56,15 +56,28 @@ describe('sessionAwareFetch', () => {
 		expect(unauthorized.expired()).toBe(1);
 	});
 
-	it('reports an expired session for a raw redirect or an HTML error that is not JSON', async () => {
-		const raw = askWith(answer({ ok: false, status: 302, headers: new Headers() }));
-		await expect(raw.call('/api/home')).rejects.toBeInstanceOf(SessionExpired);
+	it.each([
+		['a raw 302', { ok: false, status: 302, headers: new Headers() }],
+		['a 403', { ok: false, status: 403, headers: new Headers({ 'content-type': 'text/html' }) }]
+	])('reports an expired session for %s', async (_name, overrides) => {
+		const gate = askWith(answer(overrides));
+		await expect(gate.call('/api/home')).rejects.toBeInstanceOf(SessionExpired);
 
-		const login = askWith(
-			answer({ ok: false, status: 403, headers: new Headers({ 'content-type': 'text/html' }) })
-		);
+		expect(gate.expired()).toBe(1);
+	});
 
-		await expect(login.call('/api/home')).rejects.toBeInstanceOf(SessionExpired);
+	it.each([
+		['a 500 HTML page', 500, 'text/html'],
+		['a 502 without a type', 502, ''],
+		['a 503 HTML page', 503, 'text/html'],
+		['a 404 HTML page', 404, 'text/html'],
+		['a 204 without a body', 204, '']
+	])('leaves %s to the caller as an ordinary reply', async (_name, status, type) => {
+		const headers = type === '' ? new Headers() : new Headers({ 'content-type': type });
+		const gate = askWith(answer({ ok: status < 300, status, headers }));
+
+		expect((await gate.call('/api/home')).status).toBe(status);
+		expect(gate.expired()).toBe(0);
 	});
 
 	it('reports an expired session for an HTML page where JSON was expected', async () => {
