@@ -32,5 +32,9 @@
 	"dependencies": {
 		"yaml": "^2.9.1",
 		"zod": "^4.6.5"
+	},
+	"packageManager": "pnpm@12.3.4",
+	"engines": {
+		"node": ">=24"
 	}
 }
