@@ -1,7 +1,10 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { z } from 'zod';
 	import { api, type ThoughtData } from '../api';
+	import EditorRecovery from '../components/EditorRecovery.svelte';
 	import ThoughtCard from '../components/ThoughtCard.svelte';
+	import { editorBackups } from '../tab';
 	import { setDone } from '../thoughts';
 
 	let { id }: { id: string } = $props();
@@ -11,8 +14,6 @@
 		ended: 'waiting to be split',
 		split: 'split into thoughts'
 	} as const;
-
-	const CONFLICT_TEXT = 'Changed elsewhere. Reload to see the latest; your text is kept here.';
 
 	type RambleData = Extract<Awaited<ReturnType<typeof load>>, { kind: 'loaded' }>['view'];
 
@@ -30,48 +31,107 @@
 
 	type SaveState = 'idle' | 'saved' | 'invalid' | 'conflict';
 
+	const doc = $derived(`ramble:${id}`);
+
+	const backups = editorBackups(z.object({ body: z.string() }), () => (backupFailed = true));
+
+	let backupFailed = $state(false);
+
 	let loading = $state<'loading' | 'missing' | 'failed' | 'loaded'>('loading');
 
 	let view = $state<RambleData | null>(null);
 
 	let body = $state('');
 
+	// The revision the text in the box is based on, and the server's text at
+	// that point. While they differ from the box, a backup is kept.
+	let base = $state(0);
+
+	let saved = $state({ body: '' });
+
+	// The server's current version, when the box holds something else.
+	let latest = $state<{ body: string; revision: number } | null>(null);
+
+	let restored = $state(false);
+
+	let ready = $state(false);
+
 	let saveState = $state<SaveState>('idle');
 
 	let toggleConflict = $state(false);
+
+	$effect(() => {
+		if (ready) backups.sync(doc, { body }, saved, base);
+	});
 
 	async function refresh(): Promise<void> {
 		const result = await load();
 
 		loading = result.kind;
 
-		if (result.kind === 'loaded') {
-			view = result.view;
-			body = result.view.ramble.body;
+		if (result.kind !== 'loaded') return;
+		view = result.view;
+		const server = { body: result.view.ramble.body };
+		const found = await backups.restore(doc, server);
+
+		latest = { ...server, revision: result.view.ramble.revision };
+		saved = server;
+
+		if (found) {
+			({ body } = found.draft);
+			base = found.revision;
+			restored = true;
+		} else {
+			({ body } = server);
+			base = result.view.ramble.revision;
 		}
+
+		ready = true;
 	}
 
 	async function save(event: SubmitEvent) {
 		event.preventDefault();
 
 		if (!view) return;
+		const sent = { body };
 
 		try {
-			const res = await api.ramble[':id'].$put({
-				param: { id },
-				json: { body, revision: view.ramble.revision }
-			});
+			const res = await api.ramble[':id'].$put({ param: { id }, json: { body, revision: base } });
 
 			saveState = res.ok ? 'saved' : res.status === 409 ? 'conflict' : 'invalid';
 
-			// The revision moved on; the text in the box stays as typed.
 			if (res.ok) {
-				const { revision } = await res.json();
-				view = { ...view, ramble: { ...view.ramble, revision } };
+				({ revision: base } = await res.json());
+				saved = sent;
+				restored = false;
+			} else if (res.status === 409) {
+				const fresh = await load();
+
+				if (fresh.kind === 'loaded') {
+					latest = { body: fresh.view.ramble.body, revision: fresh.view.ramble.revision };
+				}
 			}
 		} catch {
 			saveState = 'invalid';
 		}
+	}
+
+	// Explicit choice after looking at the current version: the text stays, only its base moves.
+	function rebase() {
+		if (!latest) return;
+		base = latest.revision;
+		saved = { body: latest.body };
+		saveState = 'idle';
+	}
+
+	function discard() {
+		if (!latest) return;
+		body = latest.body;
+		base = latest.revision;
+		saved = { body: latest.body };
+		restored = false;
+		saveState = 'idle';
+		backups.remove(doc);
 	}
 
 	async function toggle(thought: ThoughtData, done: boolean) {
@@ -102,8 +162,16 @@
 		<button>Save</button>
 		{#if saveState === 'saved'}<span class="status">saved. Thoughts copied from it are unchanged.</span>{/if}
 		{#if saveState === 'invalid'}<span class="status failed">could not save</span>{/if}
-		{#if saveState === 'conflict'}<span class="status failed">{CONFLICT_TEXT}</span>{/if}
 	</form>
+
+	<EditorRecovery
+		{restored}
+		conflict={saveState === 'conflict'}
+		{backupFailed}
+		{latest}
+		ondiscard={discard}
+		onrebase={rebase}
+	/>
 
 	{#if toggleConflict}
 		<p class="error">That thought changed elsewhere. Reload to see the latest.</p>
