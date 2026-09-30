@@ -66,6 +66,8 @@ function user(sub: string) {
 	};
 }
 
+const revisionReply = z.object({ revision: z.number() });
+
 const idReply = z.object({ id: z.string() });
 
 const rambleReply = z.object({ ramble: z.object({ body: z.string() }) });
@@ -289,6 +291,43 @@ describe('thoughts', () => {
 		const stale = await me('PUT', path, { revision: thought.revision, label: 'x' });
 		expect(stale.status).toBe(409);
 		expect((await read(await me('GET', path), thoughtReply)).todo).toBe('done');
+	});
+
+	it('replies with the new revision so an edit that lands between two saves conflicts', async () => {
+		const me = user('me');
+		const thought = await firstThought(me);
+		const path = `/api/thought/${thought.id}`;
+
+		const first = await read(
+			await me('PUT', path, { revision: thought.revision, label: 'mine' }),
+			revisionReply
+		);
+
+		expect(first.revision).toBe(thought.revision + 1);
+
+		// Another device writes after the first save.
+		const other = await read(
+			await me('PUT', path, { revision: first.revision, body: 'theirs' }),
+			revisionReply
+		);
+
+		// This tab still holds the revision from its own save, not the other's.
+		const second = await me('PUT', path, { revision: first.revision, label: 'mine again' });
+		expect(second.status).toBe(409);
+		expect((await read(await me('GET', path), thoughtReply)).revision).toBe(other.revision);
+	});
+
+	it('replies with the new revision after a ramble edit too', async () => {
+		const me = user('me');
+		await me('PUT', '/api/ramble', { id: ID, body: BODY, base: null });
+
+		const saved = await read(
+			await me('PUT', `/api/ramble/${ID}`, { body: 'new', revision: 1 }),
+			revisionReply
+		);
+
+		expect(saved.revision).toBe(2);
+		expect((await me('PUT', `/api/ramble/${ID}`, { body: 'x', revision: 1 })).status).toBe(409);
 	});
 
 	it('deletes with a fresh revision, refuses a stale one, and then finds nothing', async () => {

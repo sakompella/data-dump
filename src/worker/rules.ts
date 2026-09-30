@@ -28,7 +28,8 @@ export interface Sql {
 	transaction<T>(work: () => T): T;
 }
 
-// Each entry is one schema version; entries are never edited once shipped.
+// Each entry is one schema version; entries are never edited once deployed.
+// Nothing has been deployed yet, so version 1 is still the only one.
 const MIGRATIONS: readonly (readonly string[])[] = [
 	[
 		`CREATE TABLE rambles (
@@ -48,11 +49,11 @@ const MIGRATIONS: readonly (readonly string[])[] = [
 			created_at INTEGER NOT NULL,
 			body TEXT NOT NULL
 		)`,
-		'CREATE INDEX thoughts_by_ramble ON thoughts (ramble_id)'
-	],
-	// A discarded id must never come back: a tab that still holds it would
-	// otherwise match a revision of the new ramble by accident.
-	['CREATE TABLE discarded_rambles (id TEXT PRIMARY KEY)']
+		'CREATE INDEX thoughts_by_ramble ON thoughts (ramble_id)',
+		// A discarded id must never come back: a tab that still holds it would
+		// otherwise match a revision of the new ramble by accident.
+		'CREATE TABLE discarded_rambles (id TEXT PRIMARY KEY)'
+	]
 ];
 
 export function migrate(sql: Sql, now: Date): void {
@@ -128,7 +129,12 @@ export interface ThoughtEdit {
 }
 
 // `conflict` means the document changed since the caller read it; nothing was written.
-export type EditResult = 'saved' | 'conflict' | 'missing';
+export type EditResult =
+	| { kind: 'saved'; revision: Revision }
+	| { kind: 'conflict' }
+	| { kind: 'missing' };
+
+export type DeleteResult = 'saved' | 'conflict' | 'missing';
 
 export interface PendingSplit {
 	readonly id: RambleId;
@@ -218,11 +224,15 @@ export function createUserRules({ sql, now }: { sql: Sql; now: () => Date }) {
 		return { id, revision: body === '' ? null : insertOpenRamble(id, body) };
 	}
 
+	function discard(id: RambleId): void {
+		sql.query('DELETE FROM rambles WHERE id = ?', id);
+		sql.query('INSERT OR IGNORE INTO discarded_rambles (id) VALUES (?)', id);
+	}
+
 	// Empty rambles are deleted instead of ended: there is nothing to split.
 	function end(ramble: Stored<Ramble>): PendingSplit | null {
 		if (ramble.body.trim() === '') {
-			sql.query('DELETE FROM rambles WHERE id = ?', ramble.id);
-			sql.query('INSERT OR IGNORE INTO discarded_rambles (id) VALUES (?)', ramble.id);
+			discard(ramble.id);
 
 			return null;
 		}
@@ -306,6 +316,14 @@ export function createUserRules({ sql, now }: { sql: Sql; now: () => Date }) {
 				if (ramble.status === 'open') return { kind: 'not-ended', status: ramble.status };
 
 				if (ramble.revision !== base) return { kind: 'stale' };
+
+				// Edited to blank after it ended: nothing to publish.
+				if (ramble.body.trim() === '') {
+					discard(id);
+
+					return { kind: 'published' };
+				}
+
 				const kept = copiesFromProposals(ramble.body, proposals);
 				const copies = kept.length > 0 ? kept : [wholeRambleCopy(ramble.body)];
 				const at = now().getTime();
@@ -358,12 +376,11 @@ export function createUserRules({ sql, now }: { sql: Sql; now: () => Date }) {
 		editRamble({ id, body, base }: { id: RambleId; body: string; base: Revision }): EditResult {
 			const ramble = readRamble(id);
 
-			if (!ramble) return 'missing';
+			if (!ramble) return { kind: 'missing' };
 
-			if (ramble.revision !== base) return 'conflict';
-			writeRamble({ ...ramble, body, updatedAt: now() });
+			if (ramble.revision !== base) return { kind: 'conflict' };
 
-			return 'saved';
+			return { kind: 'saved', revision: writeRamble({ ...ramble, body, updatedAt: now() }) };
 		},
 
 		editThought({
@@ -377,24 +394,25 @@ export function createUserRules({ sql, now }: { sql: Sql; now: () => Date }) {
 		}): EditResult {
 			const thought = readThought(id);
 
-			if (!thought) return 'missing';
+			if (!thought) return { kind: 'missing' };
 
-			if (thought.revision !== base) return 'conflict';
+			if (thought.revision !== base) return { kind: 'conflict' };
 			const { label, body, todo } = { ...thought, ...edit };
+			const next = nextRevision(thought.revision);
 
 			sql.query(
 				'UPDATE thoughts SET label = ?, body = ?, todo = ?, revision = ? WHERE id = ?',
 				label,
 				body,
 				todo,
-				nextRevision(thought.revision),
+				next,
 				id
 			);
 
-			return 'saved';
+			return { kind: 'saved', revision: next };
 		},
 
-		deleteThought({ id, base }: { id: ThoughtId; base: Revision }): EditResult {
+		deleteThought({ id, base }: { id: ThoughtId; base: Revision }): DeleteResult {
 			const thought = readThought(id);
 
 			if (!thought) return 'missing';

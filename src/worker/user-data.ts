@@ -5,6 +5,7 @@ import type { ProposedThought } from '../shared/proposals';
 import {
 	createUserRules,
 	migrate,
+	type DeleteResult,
 	type EditResult,
 	type FinishResult,
 	type HomeView,
@@ -24,7 +25,7 @@ const durableSql = (storage: DurableObjectStorage): Sql => ({
 	transaction: (work) => storage.transactionSync(work)
 });
 
-// One user's data. The Worker reaches it through env.USER_DATA.idFromName(userId),
+// One user's data. The Worker reaches it through env.USER_DATA.getByName(userId),
 // so each user has a separate SQLite database. The rules live in ./rules.
 export class UserData extends DurableObject<Env> {
 	readonly #rules: ReturnType<typeof createUserRules>;
@@ -74,7 +75,7 @@ export class UserData extends DurableObject<Env> {
 		return this.#rules.editThought(edit);
 	}
 
-	deleteThought(deletion: { id: ThoughtId; base: Revision }): EditResult {
+	deleteThought(deletion: { id: ThoughtId; base: Revision }): DeleteResult {
 		return this.#rules.deleteThought(deletion);
 	}
 }

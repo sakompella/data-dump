@@ -6,7 +6,7 @@ import { MAX_PROPOSALS, proposedThought } from '../shared/proposals';
 import { rambleId, revision, thoughtId, todoState } from '../shared/schemas';
 import type { AppEnv } from './env';
 import { requireAccess } from './require-access';
-import type { EditResult } from './rules';
+import type { DeleteResult, EditResult } from './rules';
 
 // Text is stored in one SQLite row; these keep a row well under the 2 MB limit.
 const MAX_TEXT_CHARS = 500_000;
@@ -138,7 +138,7 @@ export function createApp({
 			zValidator('param', idParam(thoughtId), invalid),
 			zValidator('json', revisionOnly, invalid),
 			async (c) =>
-				editReply(
+				deleteReply(
 					c,
 					await c.env.USER_DATA.getByName(c.var.userId).deleteThought({
 						id: c.req.valid('param').id,
@@ -154,7 +154,20 @@ export function createApp({
 		});
 }
 
+// The new revision goes back to the caller, who bases its next edit on it
+// instead of asking again; an edit that landed in between then conflicts.
 function editReply(c: Context<AppEnv>, result: EditResult) {
+	switch (result.kind) {
+		case 'saved':
+			return c.json({ revision: result.revision }, 200);
+		case 'missing':
+			return c.json({ error: 'not found' }, 404);
+		case 'conflict':
+			return c.json({ error: 'changed elsewhere' }, 409);
+	}
+}
+
+function deleteReply(c: Context<AppEnv>, result: DeleteResult) {
 	switch (result) {
 		case 'saved':
 			return c.json({ saved: true }, 200);

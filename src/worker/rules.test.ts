@@ -62,10 +62,7 @@ function splitRamble(proposals = PROPOSALS) {
 describe('migrate', () => {
 	it('runs each migration once', () => {
 		migrate(db.sql, new Date());
-		expect(db.sql.query('SELECT version FROM migrations')).toEqual([
-			{ version: 1 },
-			{ version: 2 }
-		]);
+		expect(db.sql.query('SELECT version FROM migrations')).toEqual([{ version: 1 }]);
 	});
 });
 
@@ -95,6 +92,16 @@ describe('saveDraft', () => {
 	it('treats a resend of the stored text as saved', () => {
 		const { id, revision } = savedRamble();
 		expect(data.saveDraft({ id, body: BODY, base: null })).toEqual({ id, revision });
+	});
+
+	it('treats a resend of the stored text as saved even from a stale base', () => {
+		const { id, revision } = savedRamble('first');
+		data.saveDraft({ id, body: 'first, more', base: revision });
+
+		// The reply to this save was lost, so the client still holds the old revision.
+		const again = data.saveDraft({ id, body: 'first, more', base: revision });
+		expect(again).toEqual({ id, revision: 2 });
+		expect(db.sql.query('SELECT COUNT(*) AS n FROM rambles')).toEqual([{ n: 1 }]);
 	});
 
 	it('puts text for a ramble that is no longer open into a new ramble', () => {
@@ -186,13 +193,30 @@ describe('finishSplit', () => {
 		const pending = data.endRamble(id);
 
 		if (!pending) throw new Error('ramble did not end');
-		expect(data.editRamble({ id, body: 'Rev keeps stalling.', base: pending.revision })).toBe(
-			'saved'
-		);
+		expect(data.editRamble({ id, body: 'Rev keeps stalling.', base: pending.revision })).toEqual({
+			kind: 'saved',
+			revision: 3
+		});
 		expect(data.finishSplit({ id, revision: pending.revision, proposals: PROPOSALS })).toEqual({
 			kind: 'stale'
 		});
 		expect(data.home().pending).toEqual([{ id, body: 'Rev keeps stalling.', revision: 3 }]);
+	});
+
+	it('discards a ramble that was edited to blank after it ended', () => {
+		const { id } = savedRamble();
+		const pending = data.endRamble(id);
+
+		if (!pending) throw new Error('ramble did not end');
+		const edited = data.editRamble({ id, body: '  \n', base: pending.revision });
+
+		if (edited.kind !== 'saved') throw new Error('edit failed');
+		expect(data.finishSplit({ id, revision: edited.revision, proposals: [] })).toEqual({
+			kind: 'published'
+		});
+		expect(data.home()).toMatchObject({ thoughts: [], pending: [] });
+		expect(data.ramble(id)).toBeNull();
+		expect(data.saveDraft({ id, body: 'late', base: null }).id).not.toBe(id);
 	});
 
 	it('writes nothing when a thought insert fails', () => {
@@ -222,7 +246,7 @@ describe('edits', () => {
 	it('refuses a ramble edit based on an old revision', () => {
 		const { id, revision } = savedRamble();
 		data.saveDraft({ id, body: `${BODY}!`, base: revision });
-		expect(data.editRamble({ id, body: 'stale', base: revision })).toBe('conflict');
+		expect(data.editRamble({ id, body: 'stale', base: revision })).toEqual({ kind: 'conflict' });
 		expect(data.ramble(id)?.ramble.body).toBe(`${BODY}!`);
 	});
 
@@ -231,7 +255,9 @@ describe('edits', () => {
 		const before = data.ramble(id);
 
 		if (!before) throw new Error('missing');
-		expect(data.editRamble({ id, body: 'edited', base: before.ramble.revision })).toBe('saved');
+		expect(data.editRamble({ id, body: 'edited', base: before.ramble.revision }).kind).toBe(
+			'saved'
+		);
 		expect(data.ramble(id)?.ramble).toMatchObject({ status: 'split', body: 'edited' });
 		expect(data.ramble(id)?.thoughts).toEqual(before.thoughts);
 	});
@@ -239,8 +265,13 @@ describe('edits', () => {
 	it('refuses a thought edit based on an old revision', () => {
 		const thought = publishedThought();
 		const base = thought.revision;
-		expect(data.editThought({ id: thought.id, base, edit: { todo: 'done' } })).toBe('saved');
-		expect(data.editThought({ id: thought.id, base, edit: { label: 'x' } })).toBe('conflict');
+		expect(data.editThought({ id: thought.id, base, edit: { todo: 'done' } })).toEqual({
+			kind: 'saved',
+			revision: base + 1
+		});
+		expect(data.editThought({ id: thought.id, base, edit: { label: 'x' } })).toEqual({
+			kind: 'conflict'
+		});
 		expect(data.thought(thought.id)).toMatchObject({ todo: 'done', label: thought.label });
 	});
 
@@ -250,7 +281,7 @@ describe('edits', () => {
 		expect(data.thought(thought.id)).toBeNull();
 		expect(
 			data.editThought({ id: thought.id, base: thought.revision, edit: { label: 'back?' } })
-		).toBe('missing');
+		).toEqual({ kind: 'missing' });
 	});
 
 	it('refuses a delete based on an old revision', () => {
@@ -348,8 +379,8 @@ describe('any order of saves, ends, splits, and edits', () => {
 
 						if (
 							current &&
-							d.editRamble({ id: t.id, body: current.body + o.word, base: current.revision }) ===
-								'saved'
+							d.editRamble({ id: t.id, body: current.body + o.word, base: current.revision })
+								.kind === 'saved'
 						) {
 							confirmed.set(t.id, current.body + o.word);
 						}
