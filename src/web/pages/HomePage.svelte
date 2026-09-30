@@ -3,6 +3,7 @@
 	import { api, chatgptModel, type HomeData, type ThoughtData } from '../api';
 	import Capture from '../components/Capture.svelte';
 	import ThoughtCard from '../components/ThoughtCard.svelte';
+	import { savesSettled } from '../pending-saves';
 	import { splitRamble } from '../split-client';
 	import { setDone } from '../thoughts';
 
@@ -40,6 +41,7 @@
 	// Rambles still waiting from earlier are split one at a time.
 	onMount(() => {
 		void (async () => {
+			await savesSettled();
 			[model] = await Promise.all([chatgptModel(), load()]);
 			const waiting = home?.pending ?? [];
 

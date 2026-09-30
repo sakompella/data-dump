@@ -1,13 +1,15 @@
 import { hc, type InferResponseType } from 'hono/client';
 import type { AppType } from '../worker/app';
+import { session } from './session.svelte';
+import { sessionAwareFetch } from './session-fetch';
 
-export const api = hc<AppType>('/').api;
+export const api = hc<AppType>('/', {
+	fetch: sessionAwareFetch(fetch, () => (session.expired = true))
+}).api;
 
 export type HomeData = InferResponseType<typeof api.home.$get, 200>;
 
 export type ThoughtData = HomeData['thoughts'][number];
-
-export type ConfigData = InferResponseType<typeof api.config.$get, 200>;
 
 // The model name is fixed for a deployment, so it is asked for once.
 let model: Promise<string | null> | undefined;

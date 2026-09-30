@@ -65,9 +65,10 @@
 			saveState = res.ok ? 'saved' : res.status === 409 ? 'conflict' : 'invalid';
 
 			// The revision moved on; the text in the box stays as typed.
-			const fresh = res.ok ? await load() : null;
-
-			if (fresh?.kind === 'loaded') view = fresh.view;
+			if (res.ok) {
+				const { revision } = await res.json();
+				view = { ...view, ramble: { ...view.ramble, revision } };
+			}
 		} catch {
 			saveState = 'invalid';
 		}

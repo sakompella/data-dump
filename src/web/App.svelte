@@ -6,6 +6,7 @@
 	import RamblePage from './pages/RamblePage.svelte';
 	import ThoughtPage from './pages/ThoughtPage.svelte';
 	import { interceptLinkClicks, router } from './router.svelte';
+	import { session } from './session.svelte';
 	import { chatgptAuth } from './split-client';
 
 	// Tokens live in this browser, so the header learns the status here.
@@ -36,6 +37,9 @@
 			<a class="meta" href="/connect">ChatGPT</a>
 		{/if}
 	</header>
+	{#if session.expired}
+		<p class="error">Signed out. Your text is kept here. Reload the page to sign in again.</p>
+	{/if}
 	<!-- A new key remounts the page, so each route starts with fresh state. -->
 	{#key router.path}
 		{#if router.route.page === 'home'}

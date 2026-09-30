@@ -5,6 +5,7 @@
 	import { newRambleId, parseRambleId, parseRevision, type Revision } from '../../shared/ids';
 	import { IDLE_GAP_MS } from '../../shared/idle';
 	import { api, type HomeData } from '../api';
+	import { trackSave } from '../pending-saves';
 	import { splitRamble } from '../split-client';
 
 	// `revision` is what the server last confirmed for `id`; saves are based on it.
@@ -72,6 +73,8 @@
 	let saveInFlight: Promise<boolean> | null = null;
 
 	let lastInputAt = Date.now();
+
+	let releaseTab: (() => void) | undefined;
 
 	let saveTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -289,6 +292,14 @@
 
 	async function restore() {
 		const [first, ...rest] = await orphanedBackups();
+		// Typing during the lock checks above wins; restored text is then saved on its own.
+		const untouched = text === '' && id === null;
+
+		if (!untouched) {
+			for (const orphan of first ? [first, ...rest] : rest) await saveOrphan(orphan);
+
+			return;
+		}
 
 		if (first) {
 			id = first.draft.id;
@@ -313,12 +324,21 @@
 	}
 
 	onMount(() => {
-		void navigator.locks.request(`${TAB_LOCK_PREFIX}${tabId}`, () => new Promise(() => {}));
+		void navigator.locks.request(
+			`${TAB_LOCK_PREFIX}${tabId}`,
+			() => new Promise<void>((release) => (releaseTab = release))
+		);
+
 		void restore();
 
 		return () => {
 			clearTimeout(saveTimer);
 			clearTimeout(idleTimer);
+			// Text typed in the last moments is saved, not dropped. The tab lock stays
+			// held until then, so a failed save leaves a backup the next page cannot
+			// mistake for an orphan yet, and one it can once the lock is released.
+			const flush = save(() => text).finally(() => releaseTab?.());
+			trackSave(flush);
 		};
 	});
 </script>

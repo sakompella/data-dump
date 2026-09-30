@@ -63,9 +63,7 @@
 			saveState = res.ok ? 'saved' : res.status === 409 ? 'conflict' : 'invalid';
 
 			// Only the revision moves on; what is in the form stays as typed.
-			const fresh = res.ok ? await load() : null;
-
-			if (fresh?.kind === 'loaded') thought = fresh.thought;
+			if (res.ok) thought = { ...thought, revision: (await res.json()).revision };
 		} catch {
 			saveState = 'invalid';
 		}
