@@ -9,6 +9,16 @@ honestly.
 maybe email Michael about Friday`;
 
 describe('copiesFromProposals', () => {
+	it('keeps a repeated or overlapping passage once', () => {
+		const copies = copiesFromProposals(ramble, [
+			{ label: 'first', text: 'maybe email Michael', todo: true },
+			{ label: 'again', text: 'maybe email Michael', todo: false },
+			{ label: 'wider', text: 'email Michael about Friday', todo: false }
+		]);
+
+		expect(copies).toEqual([{ label: 'first', body: 'maybe email Michael', todo: 'open' }]);
+	});
+
 	it('keeps verbatim passages as the exact source slice, in ramble order', () => {
 		const copies = copiesFromProposals(ramble, [
 			{ label: 'Michael', text: 'maybe email Michael about Friday', todo: true },
@@ -76,6 +86,34 @@ describe('copiesFromProposals', () => {
 				for (const copy of copies) {
 					expect(body).toContain(copy.body);
 					expect(copy.body.trim()).not.toBe('');
+				}
+			})
+		);
+	});
+});
+
+describe('copiesFromProposals on any proposals', () => {
+	it('keeps exact source slices that never overlap', () => {
+		const words = ['alpha', 'beta', 'gamma', 'delta'];
+		const source = 'alpha beta gamma  delta alpha beta';
+
+		const proposal = fc.record({
+			label: fc.constant('l'),
+			text: fc
+				.array(fc.constantFrom(...words), { minLength: 1, maxLength: 3 })
+				.map((picked) => picked.join(' ')),
+			todo: fc.boolean()
+		});
+
+		fc.assert(
+			fc.property(fc.array(proposal, { maxLength: 8 }), (proposals) => {
+				const copies = copiesFromProposals(source, proposals);
+				let from = 0;
+
+				for (const copy of copies) {
+					const at = source.indexOf(copy.body, from);
+					expect(at).toBeGreaterThanOrEqual(0);
+					from = at + copy.body.length;
 				}
 			})
 		);

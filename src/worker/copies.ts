@@ -34,7 +34,8 @@ export const wholeRambleCopy = (ramble: string): ThoughtCopy => ({
 	todo: 'none'
 });
 
-// Keeps only proposals that are the user's own words, in ramble order.
+// Keeps only proposals that are the user's own words, in ramble order. Repeated
+// or overlapping passages are kept once (the first proposal wins).
 export function copiesFromProposals(
 	ramble: string,
 	proposals: readonly ProposedThought[]
@@ -47,8 +48,15 @@ export function copiesFromProposals(
 			const label = proposal.label.trim() || fallbackLabel(passage.text);
 			const todo: TodoState = proposal.todo ? 'open' : 'none';
 
-			return [{ start: passage.start, copy: { label, body: passage.text, todo } }];
+			const end = passage.start + passage.text.length;
+
+			return [{ start: passage.start, end, copy: { label, body: passage.text, todo } }];
 		})
 		.sort((a, b) => a.start - b.start)
-		.map(({ copy }) => copy);
+		.reduce<{ end: number; kept: ThoughtCopy[] }>(
+			// A passage that starts inside one already kept would repeat some of its words.
+			(acc, item) =>
+				item.start < acc.end ? acc : { end: item.end, kept: [...acc.kept, item.copy] },
+			{ end: 0, kept: [] }
+		).kept;
 }
