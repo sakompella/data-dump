@@ -12,14 +12,17 @@
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"test": "vitest run",
 		"test:watch": "vitest",
-		"start": "node --env-file-if-exists=.env build"
+		"start": "node --env-file-if-exists=.env build",
+		"lint": "oxlint"
 	},
 	"devDependencies": {
+		"@oxlint/plugins": "1.86.0",
 		"@sveltejs/adapter-node": "^5.5.7",
 		"@sveltejs/kit": "^2.63.0",
 		"@sveltejs/vite-plugin-svelte": "^7.1.2",
 		"@types/node": "^26.6.3",
 		"fast-check": "^4.10.2",
+		"oxlint": "1.86.0",
 		"svelte": "^5.56.1",
 		"svelte-check": "^4.6.0",
 		"typescript": "^6.0.3",
