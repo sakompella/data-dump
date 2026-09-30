@@ -67,38 +67,69 @@ afterEach(() => {
 	vi.useRealTimers();
 });
 
+// Loads the app, then types into the capture box once every API reply is
+// `reply`. Returns what the page shows and what stays backed up.
+async function typeWhileServerAnswers(reply: (init: RequestInit | undefined) => Response) {
+	let switched = false;
+	network.use((input, init) =>
+		switched ? Promise.resolve(reply(init)) : server.fetch(input, init)
+	);
+	// A fresh page load: module state such as the session flag starts over.
+	vi.resetModules();
+	const { flushSync, mount } = await import('svelte');
+	const { default: App } = await import('./App.svelte');
+	mount(App, { target: document.body });
+	await settle();
+	expect(document.body.textContent).not.toMatch(/signed out/i);
+	const box = document.querySelector('textarea');
+
+	if (!box) throw new Error('the home page shows no capture box');
+
+	switched = true;
+	box.value = 'typed after the switch';
+	box.dispatchEvent(new Event('input', { bubbles: true }));
+	flushSync();
+	await vi.advanceTimersByTimeAsync(SAVE_DELAY_MS);
+	await settle();
+
+	const backups = Object.keys(localStorage)
+		.filter((key) => key.startsWith(BACKUP_PREFIX))
+		.map((key) => localStorage.getItem(key));
+
+	return { page: document.body.textContent ?? '', box: box.value, backups };
+}
+
 describe('an expired Access session', () => {
 	it.each<ExpiredReply>(['opaque redirect', 'login page', 'raw redirect', 'JSON 401'])(
 		'is shown as signed out, and the text stays in the box and the backup (%s)',
 		async (kind) => {
-			let expired = false;
-			network.use((input, init) =>
-				expired ? Promise.resolve(expiredReply(kind, init)) : server.fetch(input, init)
+			const { page, box, backups } = await typeWhileServerAnswers((init) =>
+				expiredReply(kind, init)
 			);
-			// A fresh page load: module state such as the session flag starts over.
-			vi.resetModules();
-			const { flushSync, mount } = await import('svelte');
-			const { default: App } = await import('./App.svelte');
-			mount(App, { target: document.body });
-			await settle();
-			expect(document.body.textContent).not.toMatch(/signed out/i);
-			const box = document.querySelector('textarea');
 
-			if (!box) throw new Error('the home page shows no capture box');
+			expect(page).toMatch(/signed out|sign in/i);
+			expect(box).toBe('typed after the switch');
+			expect(backups).toEqual([expect.stringContaining('typed after the switch')]);
+		}
+	);
+});
 
-			expired = true;
-			box.value = 'typed after the session ended';
-			box.dispatchEvent(new Event('input', { bubbles: true }));
-			flushSync();
-			await vi.advanceTimersByTimeAsync(SAVE_DELAY_MS);
-			await settle();
+describe('a server error page', () => {
+	it.each([500, 502, 503])(
+		'shows an HTML %i as not saved, not as signed out, and keeps the text and backup',
+		async (status) => {
+			const { page, box, backups } = await typeWhileServerAnswers(
+				() =>
+					new Response('<!doctype html><title>Bad gateway</title>', {
+						status,
+						headers: { 'content-type': 'text/html' }
+					})
+			);
 
-			expect(document.body.textContent).toMatch(/signed out|sign in/i);
-			expect(box.value).toBe('typed after the session ended');
-			const backups = Object.keys(localStorage).filter((key) => key.startsWith(BACKUP_PREFIX));
-			expect(backups.map((key) => localStorage.getItem(key))).toEqual([
-				expect.stringContaining('typed after the session ended')
-			]);
+			expect(page).not.toMatch(/signed out|sign in/i);
+			expect(page).toMatch(/not saved/i);
+			expect(box).toBe('typed after the switch');
+			expect(backups).toEqual([expect.stringContaining('typed after the switch')]);
 		}
 	);
 });
