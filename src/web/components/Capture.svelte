@@ -5,7 +5,9 @@
 	import { newRambleId, parseRambleId, parseRevision, type Revision } from '../../shared/ids';
 	import { IDLE_GAP_MS } from '../../shared/idle';
 	import { api, type HomeData } from '../api';
+	import { oncePerGeneration } from '../end-gate';
 	import { trackSave } from '../pending-saves';
+	import { browserStorage, tolerant } from '../safe-storage';
 	import { splitRamble } from '../split-client';
 
 	// `revision` is what the server last confirmed for `id`; saves are based on it.
@@ -52,6 +54,11 @@
 
 	const backupKey = `${BACKUP_PREFIX}${tabId}`;
 
+	// Set when the browser refused a backup; saving to the server carries on.
+	let backupFailed = $state(false);
+
+	const store = tolerant(browserStorage(), () => (backupFailed = true));
+
 	let text = $state('');
 
 	let status = $state<SaveStatus>('empty');
@@ -94,8 +101,8 @@
 	}
 
 	function writeBackup() {
-		if (id === null) localStorage.removeItem(backupKey);
-		else localStorage.setItem(backupKey, JSON.stringify({ id, body: text, revision }));
+		if (id === null) store.removeItem(backupKey);
+		else store.setItem(backupKey, JSON.stringify({ id, body: text, revision }));
 	}
 
 	type SaveReply = { ok: true; id: RambleId; revision: Revision | null } | { ok: false };
@@ -137,7 +144,7 @@
 		acked = target.draft.body;
 		status = text === acked ? 'saved' : 'saving';
 
-		if (text === acked) localStorage.removeItem(backupKey);
+		if (text === acked) store.removeItem(backupKey);
 		else writeBackup();
 
 		return true;
@@ -213,18 +220,25 @@
 
 	// Saves exactly what is in the box now, then ends that ramble. Text typed
 	// while the save runs starts the next ramble.
-	async function endCurrent() {
-		clearTimeout(idleTimer);
+	const endOnce = oncePerGeneration(() => capture);
 
-		if (id === null) return;
-		const snapshot = text;
-		clearTimeout(saveTimer);
+	const endCurrent = () =>
+		endOnce(async () => {
+			clearTimeout(idleTimer);
 
-		if (!(await save(() => snapshot)) || id === null) return;
-		const endingId = id;
-		startCapture(text.startsWith(snapshot) ? text.slice(snapshot.length) : text);
-		void endOnServer(endingId);
-	}
+			if (id === null) return;
+			const generation = capture;
+			const snapshot = text;
+			clearTimeout(saveTimer);
+
+			if (!(await save(() => snapshot))) return;
+
+			// Another path already moved on to a new capture; ending `id` now would end that one.
+			if (capture !== generation || id === null) return;
+			const endingId = id;
+			startCapture(text.startsWith(snapshot) ? text.slice(snapshot.length) : text);
+			void endOnServer(endingId);
+		});
 
 	const isPastIdleGap = () => id !== null && Date.now() - lastInputAt > IDLE_GAP_MS;
 
@@ -264,7 +278,7 @@
 
 	// Backups left by tabs that are gone, other than ones the server already holds.
 	async function orphanedBackups(): Promise<{ key: string; draft: Draft }[]> {
-		const keys = Object.keys(localStorage).filter(
+		const keys = store.keys().filter(
 			(key) => key.startsWith(BACKUP_PREFIX) && key !== backupKey
 		);
 
@@ -272,10 +286,10 @@
 
 		for (const key of keys) {
 			if (!(await tabIsGone(key.slice(BACKUP_PREFIX.length)))) continue;
-			const backup = parseBackup(localStorage.getItem(key));
+			const backup = parseBackup(store.getItem(key));
 
 			if (!backup || (backup.id === draft?.id && backup.body === draft.body)) {
-				localStorage.removeItem(key);
+				store.removeItem(key);
 			} else {
 				found.push({ key, draft: backup });
 			}
@@ -287,7 +301,7 @@
 	// A backup that does not go into the box is saved as it is. Its record
 	// is removed only once the server has confirmed that exact text.
 	async function saveOrphan({ key, draft }: { key: string; draft: Draft }) {
-		if ((await putDraft(draft)).ok) localStorage.removeItem(key);
+		if ((await putDraft(draft)).ok) store.removeItem(key);
 	}
 
 	async function restore() {
@@ -307,7 +321,7 @@
 			revision = first.draft.revision;
 			acked = '';
 			writeBackup();
-			localStorage.removeItem(first.key);
+			store.removeItem(first.key);
 			void save(() => text);
 			scheduleIdleEnd();
 		} else if (draft) {
@@ -363,6 +377,7 @@
 		{#if status === 'failed'}
 			<button type="button" class="small" onclick={() => save(() => text)}>Retry</button>
 		{/if}
+		{#if backupFailed}<span class="status failed">backup unavailable in this browser</span>{/if}
 		{#if endsInFlight > 0}<span class="status">splitting…</span>{/if}
 	</div>
 </section>

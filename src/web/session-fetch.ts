@@ -11,6 +11,7 @@ interface Reply {
 	readonly type: string;
 	readonly redirected: boolean;
 	readonly ok: boolean;
+	readonly status: number;
 	readonly headers: { get(name: string): string | null };
 }
 
@@ -22,7 +23,12 @@ export function sessionAwareFetch<Answer extends Reply>(
 		const answer = await fetchFn(input, { ...init, redirect: 'manual' });
 		const isJson = answer.headers.get('content-type')?.includes('application/json') ?? false;
 
-		if (answer.type === 'opaqueredirect' || answer.redirected || (answer.ok && !isJson)) {
+		if (
+			answer.type === 'opaqueredirect' ||
+			answer.redirected ||
+			answer.status === 401 ||
+			(answer.ok && !isJson)
+		) {
 			onExpired();
 			throw new SessionExpired();
 		}

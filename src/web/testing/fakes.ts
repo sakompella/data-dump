@@ -25,6 +25,7 @@ export function createFakeStorage() {
 		items,
 		getItem: (key: string) => items.get(key) ?? null,
 		setItem: (key: string, value: string) => void items.set(key, value),
-		removeItem: (key: string) => void items.delete(key)
+		removeItem: (key: string) => void items.delete(key),
+		keys: () => [...items.keys()]
 	};
 }

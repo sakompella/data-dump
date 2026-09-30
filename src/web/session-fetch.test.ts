@@ -49,6 +49,13 @@ describe('sessionAwareFetch', () => {
 		expect(redirected.expired()).toBe(1);
 	});
 
+	it('reports an expired session for a JSON 401', async () => {
+		const unauthorized = askWith(answer({ ok: false, status: 401 }));
+		await expect(unauthorized.call('/api/home')).rejects.toBeInstanceOf(SessionExpired);
+
+		expect(unauthorized.expired()).toBe(1);
+	});
+
 	it('reports an expired session for an HTML page where JSON was expected', async () => {
 		const html = askWith(answer({ headers: new Headers({ 'content-type': 'text/html' }) }));
 		await expect(html.call('/api/home')).rejects.toBeInstanceOf(SessionExpired);
