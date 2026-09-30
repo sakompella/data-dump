@@ -398,3 +398,41 @@ describe('recovering capture backups', () => {
 		expect(document.body.textContent).toMatch(/backup unavailable/i);
 	});
 });
+
+describe('an ended capture that could not be saved', () => {
+	it('stays shown as not saved, with Retry, after the next capture saves', async () => {
+		let down = true;
+		network.use((input, init) =>
+			down && init?.method === 'PUT'
+				? Promise.reject(new TypeError('Failed to fetch'))
+				: server.fetch(input, init)
+		);
+		const { box } = mountCapture();
+		await settle();
+		type(box, 'the old ramble');
+		clickButton('New ramble');
+		await settle();
+
+		down = false;
+		type(box, 'the new ramble');
+		await vi.advanceTimersByTimeAsync(SAVE_DELAY_MS);
+		await settle();
+		expect((await server.data().home()).draft?.body).toBe('the new ramble');
+
+		const unsaved = /not saved|unsaved/i;
+		expect(document.body.textContent).toMatch(unsaved);
+		clickButton('Retry');
+		await settle();
+		expect(document.body.textContent).not.toMatch(unsaved);
+		const { thoughts, pending } = await server.data().home();
+		const oldText = [...thoughts.map((t) => t.body), ...pending.map((p) => p.body)];
+		expect(oldText).toContain('the old ramble');
+	});
+});
+
+function clickButton(label: string) {
+	const button = [...document.querySelectorAll('button')].find((b) => b.textContent === label);
+
+	if (!button) throw new Error(`no ${label} button`);
+	button.click();
+}
