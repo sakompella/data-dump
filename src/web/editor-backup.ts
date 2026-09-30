@@ -5,7 +5,9 @@
 //   (b) the user discarded it, or
 //   (c) it was copied to another key and the copy was read back.
 // A storage failure is "did not happen": it never removes a record and never
-// reads as "nothing there".
+// reads as "nothing there". No record is ever overwritten: every page mount
+// writes to a key of its own that nothing else can hold, and older records are
+// only copied from.
 //
 // Keys carry the tab, so one tab never touches another live tab's backup. The
 // backup of a tab that is gone (closed, or reloaded) can be picked up again.
@@ -43,26 +45,23 @@ export function createEditorBackups<Draft extends EditorDraft>({
 }) {
 	const record = z.object({ draft: draftSchema, revision: z.number(), at: z.number() });
 
-	const ownKey = (doc: DocumentKey) => `${PREFIX}${doc}:${tabId}`;
+	// Unique to this instance (one page mount), so writing to it replaces only
+	// what this instance wrote. Records of earlier mounts keep their own keys.
+	const instance = crypto.randomUUID();
+
+	const ownKey = (doc: DocumentKey) => `${PREFIX}${doc}:${tabId}~${instance}`;
+
+	const newSpareKey = (doc: DocumentKey) => `${PREFIX}${doc}:${tabId}~${crypto.randomUUID()}`;
 
 	const encode = (draft: Draft, revision: number) =>
 		JSON.stringify({ draft, revision, at: Date.now() });
-
-	// Documents whose stored backups could not all be read. Until they can, "the
-	// form equals the server copy" must not remove this tab's record: it may be
-	// one that was never looked at.
-	const unread = new Set<DocumentKey>();
 
 	// Valid records of this tab and of tabs that are gone, newest first. Records
 	// that cannot be read or parsed are left where they are.
 	async function records(doc: DocumentKey): Promise<FoundBackup<Draft>[]> {
 		const keys = store.keys();
 
-		if (keys === null) {
-			unread.add(doc);
-
-			return [];
-		}
+		if (keys === null) return [];
 
 		const prefix = `${PREFIX}${doc}:`;
 		const found: (FoundBackup<Draft> & { at: number })[] = [];
@@ -75,10 +74,7 @@ export function createEditorBackups<Draft extends EditorDraft>({
 
 			const read = store.read(key);
 
-			if (!read.ok) {
-				unread.add(doc);
-				continue;
-			}
+			if (!read.ok) continue;
 
 			const parsed = parseRecord(read.value);
 
@@ -99,24 +95,21 @@ export function createEditorBackups<Draft extends EditorDraft>({
 	}
 
 	return {
-		// Keeps this tab's backup equal to the text on screen while it differs
+		// Keeps this instance's backup equal to the text on screen while it differs
 		// from the server's copy, and removes it once they match.
 		sync(doc: DocumentKey, current: Draft, server: Draft, revision: number): void {
-			if (!sameDraft(current, server)) {
-				store.write(ownKey(doc), encode(current, revision));
-			} else if (!unread.has(doc)) {
-				store.remove(ownKey(doc));
-			}
+			if (!sameDraft(current, server)) store.write(ownKey(doc), encode(current, revision));
+			else store.remove(ownKey(doc));
 		},
 
-		// The user discarded this tab's backup.
+		// The user discarded the restored text.
 		remove(doc: DocumentKey): void {
 			store.remove(ownKey(doc));
 		},
 
-		// The text to put back in the editor, if any: this tab's own backup, else
-		// the newest of the gone tabs' (copied to this tab, and its source removed
-		// only once the copy reads back). Backups equal to the server copy are
+		// The text to put back in the editor, if any: the newest backup of this tab
+		// or of a tab that is gone, copied to this instance's key; its source is
+		// removed only once the copy reads back. Backups equal to the server copy are
 		// removed. Other distinct drafts stay where they are; see `others`.
 		async restore(doc: DocumentKey, server: Draft): Promise<FoundBackup<Draft> | null> {
 			const distinct: FoundBackup<Draft>[] = [];
@@ -126,15 +119,12 @@ export function createEditorBackups<Draft extends EditorDraft>({
 				else distinct.push(backup);
 			}
 
-			const chosen = distinct.find((backup) => backup.key === ownKey(doc)) ?? distinct[0];
+			const [chosen] = distinct;
 
 			if (!chosen) return null;
+			const copied = writeConfirmed(store, ownKey(doc), encode(chosen.draft, chosen.revision));
 
-			if (chosen.key !== ownKey(doc)) {
-				const copied = writeConfirmed(store, ownKey(doc), encode(chosen.draft, chosen.revision));
-
-				if (copied) store.remove(chosen.key);
-			}
+			if (copied) store.remove(chosen.key);
 
 			return chosen;
 		},
@@ -159,7 +149,7 @@ export function createEditorBackups<Draft extends EditorDraft>({
 			server: Draft
 		): boolean {
 			if (!sameDraft(current.draft, server)) {
-				const spare = `${PREFIX}${doc}:${tabId}~${Date.now()}`;
+				const spare = newSpareKey(doc);
 
 				if (!writeConfirmed(store, spare, encode(current.draft, current.revision))) return false;
 			}

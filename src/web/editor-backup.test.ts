@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { createEditorBackups } from './editor-backup';
 import { guardStore, type KeyedStorage } from './safe-storage';
@@ -153,11 +153,11 @@ describe('when storage fails', () => {
 		// Reads fail only for the new tab's key.
 		const blind: KeyedStorage = {
 			...storage,
-			getItem: (key) => (key.endsWith(':B') ? refuse() : storage.getItem(key))
+			getItem: (key) => (key.includes(':B~') ? refuse() : storage.getItem(key))
 		};
 
 		await tab('B', blind).restore('thought:1', SERVER);
-		expect([...storage.items.keys()].some((key) => key.endsWith(':A'))).toBe(true);
+		expect([...storage.items.keys()].some((key) => key.includes(':A~'))).toBe(true);
 	});
 
 	it('does not treat a failed read as empty or as corrupt, and does not remove on a later match', async () => {
@@ -194,6 +194,77 @@ describe('when storage fails', () => {
 		expect(await b.restore('thought:1', SERVER)).toBeNull();
 		b.sync('thought:1', SERVER, SERVER, 3);
 		expect(storage.items.size).toBe(1);
+	});
+});
+
+describe('records that could not be read are never overwritten', () => {
+	const A = { label: 'l', body: 'unique A' };
+
+	const B = { label: 'l', body: 'unique B' };
+
+	// Reads fail for the record written by the first mount of tab X only.
+	function unreadableA() {
+		const env = browser();
+		env.tab('X').sync('thought:1', A, SERVER, 1);
+		const [aKey] = [...env.storage.items.keys()];
+
+		const blind: KeyedStorage = {
+			...env.storage,
+			getItem: (key) => (key === aKey ? refuse() : env.storage.getItem(key))
+		};
+
+		return { ...env, blind };
+	}
+
+	it('keeps an unreadable record of this tab when another draft is restored', async () => {
+		const { tab, gone, blind, texts } = unreadableA();
+		tab('Y').sync('thought:1', B, SERVER, 1);
+		gone.add('Y');
+
+		const second = tab('X', blind);
+		expect(await second.restore('thought:1', SERVER)).toMatchObject({ draft: B });
+		expect(texts()).toContain('unique A');
+		expect(texts()).toContain('unique B');
+	});
+
+	it('keeps an unreadable record when the form changes over it', async () => {
+		const { tab, blind, texts } = unreadableA();
+
+		const second = tab('X', blind);
+		expect(await second.restore('thought:1', SERVER)).toBeNull();
+		second.sync('thought:1', { label: 'l', body: 'typed later' }, SERVER, 1);
+
+		expect(texts().sort()).toEqual(['typed later', 'unique A']);
+	});
+});
+
+describe('spare copies', () => {
+	it('get their own key even when two are made in the same millisecond', async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+
+		try {
+			const { tab, gone, texts } = browser();
+			tab('A').sync('thought:1', { label: 'l', body: 'unique A' }, SERVER, 1);
+			tab('B').sync('thought:1', { label: 'l', body: 'unique B' }, SERVER, 1);
+			gone.add('A');
+			gone.add('B');
+
+			const c = tab('C');
+			const [first, second] = await c.others('thought:1', SERVER, SERVER);
+			const editing = { label: 'l', body: 'in the editor' };
+
+			expect(first && c.swapIn('thought:1', first, { draft: editing, revision: 1 }, SERVER)).toBe(
+				true
+			);
+			expect(
+				second &&
+					c.swapIn('thought:1', second, { draft: first?.draft ?? editing, revision: 1 }, SERVER)
+			).toBe(true);
+			expect(texts().sort()).toEqual(['in the editor', 'unique A', 'unique B']);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });
 
