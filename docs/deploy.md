@@ -5,15 +5,23 @@ Each user's data lives in one SQLite-backed Durable Object.
 
 Do these steps once, by hand. Nothing in the repo runs them.
 
-## 1. Put Cloudflare Access in front of the whole hostname
+## 1. Put Cloudflare Access in front of the Worker
 
-Static assets do not pass through the Worker, so Access must cover every path, not only `/api/*`.
+Static assets do not pass through the Worker, so Access must cover the whole site, not only `/api/*`.
+Checked against the current Cloudflare docs ("Workers > Configuration > Cloudflare Access").
 
-1. In Cloudflare Zero Trust, open Access > Applications and add a self-hosted application.
-2. Set the domain to the Worker's hostname (for example the `workers.dev` name, or your own domain). Leave the path empty.
-3. Add a policy that allows only you (for example your email address).
-4. Copy the application's **Audience (AUD) tag**.
-5. Copy your **team domain**, for example `https://<your-team>.cloudflareaccess.com`.
+Recommended: protect the Worker itself. This covers its routes, Custom Domains, the `workers.dev` name and preview/version URLs.
+
+1. Deploy once (step 3) so the Worker exists. Until Access is on, the API answers 401 to everyone, and the app shell is public.
+2. In the Cloudflare dashboard, open Workers & Pages, select `data-dump`, then the **Access** tab.
+3. Select **Protect this Worker behind Access**, then choose **All traffic**.
+4. Pick an authentication policy that allows only you (for example your email address). Apply.
+5. Copy the **Audience (AUD) tag**: Zero Trust > Access controls > Applications > Configure (on the new application) > Additional settings > Application Audience (AUD) Tag.
+6. Copy your **team domain**, for example `https://<your-team>.cloudflareaccess.com`. Use exactly this origin, with no path and no trailing slash. Any other form makes every request answer 401.
+
+Alternative: a hostname-based self-hosted Access application for one URL (path left empty).
+It protects only that exact URL. `workers.dev` and preview/version URLs stay reachable and serve the app shell (the API still refuses them).
+If you use a custom domain with this option, set `"workers_dev": false` and `"preview_urls": false` in `wrangler.jsonc`.
 
 The Worker also checks the `Cf-Access-Jwt-Assertion` token itself. Without valid settings it refuses every request.
 
@@ -23,10 +31,10 @@ Under `vars`:
 
 - `ACCESS_TEAM_DOMAIN`: the team domain from step 1.
 - `ACCESS_AUD`: the AUD tag from step 1.
-- `CHATGPT_MODEL`: the model used to split rambles, for example `gpt-5-mini`.
+- `CHATGPT_MODEL`: the model used to split rambles. `gpt-5-mini` is only an example; it is not checked.
   Which models a ChatGPT plan accepts is up to OpenAI. While it is empty, rambles are not split.
 
-Do not set `DEV_USER_ID` here. It only works in `pnpm dev`.
+Do not set `DEV_USER_ID` here. It only works in `pnpm dev`. `pnpm preview` answers 401 everywhere, because it has no Access token.
 
 ## 3. Deploy
 
@@ -41,6 +49,10 @@ The first deploy creates the `UserData` Durable Object class through the migrati
 
 Open the site, then `/connect`, and follow the steps. The sign-in stays in that browser.
 The Worker never sees it.
+
+## Existing data
+
+No data migration is needed. The earlier R2-based version was never deployed, and this version starts with empty Durable Object storage.
 
 ## Local development
 
