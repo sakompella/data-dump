@@ -104,6 +104,26 @@ describe('saveDraft', () => {
 		expect(db.sql.query('SELECT COUNT(*) AS n FROM rambles')).toEqual([{ n: 1 }]);
 	});
 
+	it('updates instead of forking when a lost reply is followed by more typing', () => {
+		const { id, revision } = savedRamble('first');
+		data.saveDraft({ id, body: 'first, more', base: revision });
+
+		// The client never saw revision 2, so it still sends revision 1.
+		const later = data.saveDraft({ id, body: 'first, more, and more', base: revision });
+		expect(later).toEqual({ id, revision: 3 });
+		expect(data.ramble(id)?.ramble.body).toBe('first, more, and more');
+		expect(db.sql.query('SELECT COUNT(*) AS n FROM rambles')).toEqual([{ n: 1 }]);
+	});
+
+	it('still forks a stale save that does not extend the stored text', () => {
+		const { id, revision } = savedRamble('first');
+		data.saveDraft({ id, body: 'first, tab A', base: revision });
+		const other = data.saveDraft({ id, body: 'first, tab B', base: revision });
+
+		expect(other.id).not.toBe(id);
+		expect(data.ramble(id)?.ramble.body).toBe('first, tab A');
+	});
+
 	it('puts text for a ramble that is no longer open into a new ramble', () => {
 		const { id, revision } = savedRamble();
 		data.endRamble(id);
@@ -295,7 +315,7 @@ describe('edits', () => {
 // Two tabs and a page editor act on the same rambles in any order, each
 // working from whatever revision it last saw.
 type Op =
-	| { kind: 'type'; tab: 0 | 1; word: string }
+	| { kind: 'type'; tab: 0 | 1; word: string; replyLost: boolean }
 	| { kind: 'end'; tab: 0 | 1 }
 	| { kind: 'split'; tab: 0 | 1; proposals: ProposedThought[]; fresh: boolean }
 	| { kind: 'edit-page'; tab: 0 | 1; word: string };
@@ -305,7 +325,7 @@ const tab = fc.constantFrom(0 as const, 1 as const);
 const word = fc.constantFrom('alpha', 'beta.', 'gamma', 'delta!', ' ');
 
 const op: fc.Arbitrary<Op> = fc.oneof(
-	fc.record({ kind: fc.constant('type' as const), tab, word }),
+	fc.record({ kind: fc.constant('type' as const), tab, word, replyLost: fc.boolean() }),
 	fc.record({ kind: fc.constant('end' as const), tab }),
 	fc.record({
 		kind: fc.constant('split' as const),
@@ -341,6 +361,10 @@ describe('any order of saves, ends, splits, and edits', () => {
 				// Thoughts of each ramble as first published.
 				const published = new Map<RambleId, string[]>();
 
+				const lostReplies = new Set<number>();
+				// Every text a tab sent, in order.
+				const sent: string[] = [];
+
 				const bodies = (id: RambleId) => (d.ramble(id)?.thoughts ?? []).map((t) => t.body).sort();
 
 				for (const o of ops) {
@@ -349,8 +373,15 @@ describe('any order of saves, ends, splits, and edits', () => {
 					if (o.kind === 'type') {
 						t.text += o.word;
 						const saved = d.saveDraft({ id: t.id, body: t.text, base: t.revision });
-						t.id = saved.id;
-						t.revision = saved.revision;
+
+						// A lost reply leaves the tab with the id and revision it had before.
+						if (o.replyLost) lostReplies.add(o.tab);
+						else {
+							t.id = saved.id;
+							t.revision = saved.revision;
+						}
+
+						sent.push(t.text);
 
 						if (saved.revision !== null) confirmed.set(saved.id, t.text);
 					}
@@ -391,9 +422,18 @@ describe('any order of saves, ends, splits, and edits', () => {
 
 				// A tab's saved text is never replaced by another tab; page edits only append.
 				// Ending deletes a blank ramble, so only tabs with real text are checked.
-				for (const { id, text, revision } of tabs) {
-					if (revision === null || text.trim() === '') continue;
+				for (const [index, { id, text, revision }] of tabs.entries()) {
+					if (revision === null || text.trim() === '' || lostReplies.has(index)) continue;
 					expect(d.ramble(id)?.ramble.body.startsWith(text)).toBe(true);
+				}
+
+				// Whatever replies were lost, every text the server accepted is still stored,
+				// whole or as the start of a longer text.
+				const rambleBodies = sql.query('SELECT body FROM rambles').map((row) => String(row.body));
+
+				for (const text of sent) {
+					if (text.trim() === '') continue;
+					expect(rambleBodies.some((body) => body.startsWith(text))).toBe(true);
 				}
 
 				for (const [id, first] of published) {

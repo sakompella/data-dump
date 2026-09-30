@@ -243,9 +243,9 @@ export function createUserRules({ sql, now }: { sql: Sql; now: () => Date }) {
 	}
 
 	return {
-		// Upsert against the revision the caller last saw. A stale save is
-		// never merged or dropped: its text goes into a new ramble whose id
-		// is returned.
+		// Upsert against the revision the caller last saw. A stale save that
+		// does not extend the stored text is never merged or dropped: its text
+		// goes into a new ramble whose id is returned.
 		saveDraft({
 			id,
 			body,
@@ -268,7 +268,9 @@ export function createUserRules({ sql, now }: { sql: Sql; now: () => Date }) {
 			if (existing.status === 'open') {
 				if (existing.body === body) return { id, revision: existing.revision };
 
-				if (existing.revision === base) {
+				// A stale base whose text extends the stored text (a lost reply, then more
+				// typing) drops nothing, so it updates the ramble instead of forking it.
+				if (existing.revision === base || body.startsWith(existing.body)) {
 					return { id, revision: writeRamble({ ...existing, body, updatedAt: now() }) };
 				}
 			}
