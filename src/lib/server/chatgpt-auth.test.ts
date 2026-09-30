@@ -103,7 +103,7 @@ function fakeTokenServer(replies: TokenReply[]) {
 	return { fetch, requests };
 }
 
-const grant = (n: number, extra: Record<string, unknown> = {}): TokenReply => ({
+const grant = (n: number, extra: { id_token?: string; scope?: string } = {}): TokenReply => ({
 	status: 200,
 	json: {
 		access_token: `access-${n}`,

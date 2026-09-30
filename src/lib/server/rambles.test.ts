@@ -159,7 +159,7 @@ describe('endRamble', () => {
 	});
 
 	it('copies from the body as it was when the split started', async () => {
-		let editDuringSplit: () => Promise<unknown> = async () => undefined;
+		let editDuringSplit: () => Promise<boolean> = async () => true;
 
 		const service = createRambleService({
 			store,

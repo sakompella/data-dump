@@ -24,12 +24,16 @@ function newId(): string {
 	return `${time}-${random}`;
 }
 
+// SAFETY: newId() always returns a fresh string matching ID_PATTERN.
 export const newRambleId = (): RambleId => newId() as RambleId;
 
+// SAFETY: newId() always returns a fresh string matching ID_PATTERN.
 export const newThoughtId = (): ThoughtId => newId() as ThoughtId;
 
 export const parseRambleId = (raw: string): RambleId | null =>
+	// SAFETY: the brand is applied only after raw matches ID_PATTERN.
 	ID_PATTERN.test(raw) ? (raw as RambleId) : null;
 
 export const parseThoughtId = (raw: string): ThoughtId | null =>
+	// SAFETY: the brand is applied only after raw matches ID_PATTERN.
 	ID_PATTERN.test(raw) ? (raw as ThoughtId) : null;

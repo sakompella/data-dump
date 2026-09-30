@@ -55,6 +55,11 @@ export type PendingLogin = z.output<typeof pendingFile>;
 
 const deviceFile = z.object({ deviceId: z.uuid() });
 
+type SecretFile =
+	| z.input<typeof credentialFile>
+	| z.input<typeof pendingFile>
+	| z.input<typeof deviceFile>;
+
 const tokenResponse = z.object({
 	access_token: z.string().trim().min(1),
 	refresh_token: z.string().trim().min(1),
@@ -144,7 +149,7 @@ export function createChatGPTAuth({
 	// Kept in memory: after a restart the next refresh attempt finds out again.
 	let needsReconnect = false;
 
-	async function writeSecret(path: string, value: unknown): Promise<void> {
+	async function writeSecret(path: string, value: SecretFile): Promise<void> {
 		await mkdir(dir, { recursive: true, mode: 0o700 });
 		const temp = `${path}.${randomUUID()}.tmp`;
 		await writeFile(temp, JSON.stringify(value, null, '\t'), { encoding: 'utf8', mode: 0o600 });

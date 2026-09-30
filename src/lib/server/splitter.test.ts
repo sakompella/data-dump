@@ -20,15 +20,18 @@ const streamOf = (chunks: Uint8Array[]) =>
 		}
 	});
 
-const sseText = (payloads: unknown[], newline = '\n') =>
-	payloads
-		.map(
-			(payload) =>
-				`data: ${typeof payload === 'string' ? payload : JSON.stringify(payload)}${newline}${newline}`
-		)
-		.join('');
+type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
-const deltaEvents = (deltas: string[]) => [
+const sseText = (payloads: string[], newline = '\n') =>
+	payloads.map((payload) => `data: ${payload}${newline}${newline}`).join('');
+
+const sseEvents = (events: JsonValue[], newline = '\n') =>
+	sseText(
+		events.map((event) => JSON.stringify(event)),
+		newline
+	);
+
+const deltaEvents = (deltas: string[]): JsonValue[] => [
 	{ type: 'response.created' },
 	...deltas.map((delta) => ({ type: 'response.output_text.delta', delta })),
 	{ type: 'response.completed', response: { status: 'completed' } }
@@ -54,7 +57,7 @@ describe('collectOutputText', () => {
 				fc.boolean(),
 				fc.array(fc.nat(), { maxLength: 12 }),
 				async (deltas, newline, withComment, withDone, cuts) => {
-					const events = sseText(deltaEvents(deltas), newline);
+					const events = sseEvents(deltaEvents(deltas), newline);
 					const comment = withComment ? `: ping${newline}` : '';
 					const done = withDone ? sseText(['[DONE]'], newline) : '';
 					const bytes = encoder.encode(comment + events + done);
@@ -75,12 +78,16 @@ describe('collectOutputText', () => {
 
 	it('rejects a failed response', async () => {
 		const failed = { type: 'response.failed', response: { error: { message: 'quota' } } };
-		const stream = streamOf([encoder.encode(sseText([failed]))]);
+		const stream = streamOf([encoder.encode(sseEvents([failed]))]);
 		await expect(collectOutputText(stream)).rejects.toThrow('quota');
 	});
 
 	it('rejects a stream that stops before the response finishes', async () => {
-		const partial = sseText([{ type: 'response.output_text.delta', delta: 'x' }, '[DONE]']);
+		const partial = sseText([
+			JSON.stringify({ type: 'response.output_text.delta', delta: 'x' }),
+			'[DONE]'
+		]);
+
 		await expect(collectOutputText(streamOf([encoder.encode(partial)]))).rejects.toThrow();
 	});
 });
@@ -89,7 +96,7 @@ const PROPOSALS: ProposedThought[] = [{ label: 'Rev', text: 'Rev keeps stalling.
 
 const modelAnswer = JSON.stringify({ thoughts: PROPOSALS });
 
-type Call = { url: string; token: string | null; body: Record<string, unknown> };
+type Call = { url: string; token: string | null; body: { [key: string]: JsonValue } };
 
 // Routes /responses to scripted statuses; other calls are recorded as chat completions.
 function fakeApi(statuses: number[]) {
@@ -112,7 +119,7 @@ function fakeApi(statuses: number[]) {
 		if (status !== 200) return new Response('nope', { status });
 		const deltas = [modelAnswer.slice(0, 7), modelAnswer.slice(7)];
 
-		return new Response(sseText(deltaEvents(deltas)), {
+		return new Response(sseEvents(deltaEvents(deltas)), {
 			headers: { 'content-type': 'text/event-stream' }
 		});
 	};

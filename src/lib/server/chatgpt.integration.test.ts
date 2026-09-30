@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
-import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, expect, it } from 'vitest';
+import { z } from 'zod';
 import { newRambleId } from '$lib/ids';
 import { createChatGPTAuth } from './chatgpt-auth';
 import { createRambleService } from './rambles';
@@ -24,11 +24,13 @@ const ANSWER = JSON.stringify({
 function fakeOpenAI() {
 	const challenges = new Map<string, string>();
 
+	const apiTokens: string[] = [];
+
 	const state = {
 		issued: 0,
 		refreshRefused: false,
 		rejectNextApiCall: false,
-		apiTokens: [] as string[]
+		apiTokens
 	};
 
 	const readBody = async (request: IncomingMessage) => {
@@ -135,7 +137,7 @@ beforeEach(async () => {
 	fake = fakeOpenAI();
 	server = fake.server;
 	await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-	base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+	base = `http://127.0.0.1:${z.object({ port: z.number() }).parse(server.address()).port}`;
 });
 
 afterEach(async () => {
