@@ -7,6 +7,7 @@ A small personal website for dumping messy thoughts and getting them back later.
 - Do not edit `README.md` unless explicitly asked.
 - Files matching `_*.md` are local scratch (decision logs, summaries) and are never committed.
 - The user's writing is the primary content. Model output supports it and must not replace it.
+- Use pnpm. Deploys go through Cloudflare; see `docs/deploy.md`.
 
 ## Agent skills
 
