@@ -56,6 +56,17 @@ describe('sessionAwareFetch', () => {
 		expect(unauthorized.expired()).toBe(1);
 	});
 
+	it('reports an expired session for a raw redirect or an HTML error that is not JSON', async () => {
+		const raw = askWith(answer({ ok: false, status: 302, headers: new Headers() }));
+		await expect(raw.call('/api/home')).rejects.toBeInstanceOf(SessionExpired);
+
+		const login = askWith(
+			answer({ ok: false, status: 403, headers: new Headers({ 'content-type': 'text/html' }) })
+		);
+
+		await expect(login.call('/api/home')).rejects.toBeInstanceOf(SessionExpired);
+	});
+
 	it('reports an expired session for an HTML page where JSON was expected', async () => {
 		const html = askWith(answer({ headers: new Headers({ 'content-type': 'text/html' }) }));
 		await expect(html.call('/api/home')).rejects.toBeInstanceOf(SessionExpired);

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { createEditorBackups } from './editor-backup';
-import { browserStorage, tolerant } from './safe-storage';
+import { browserStorage, guardStore } from './safe-storage';
 
 const LOCK_PREFIX = 'data-dump:editor-tab:';
 
@@ -18,7 +18,7 @@ export function editorBackups<Draft extends Readonly<Record<string, string>>>(
 	onFailure: () => void
 ) {
 	return createEditorBackups({
-		storage: tolerant(browserStorage(), onFailure),
+		store: guardStore(browserStorage(), onFailure),
 		tabId,
 		isTabGone,
 		draftSchema

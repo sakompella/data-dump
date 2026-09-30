@@ -11,6 +11,8 @@
 
 	const TODO_TEXT = { none: 'Not a to-do', open: 'To-do', done: 'Done' } as const;
 
+	type Others = Awaited<ReturnType<typeof backups.others>>;
+
 	type SaveState = 'idle' | 'saved' | 'invalid' | 'conflict';
 
 	type ThoughtView = Extract<Awaited<ReturnType<typeof load>>, { kind: 'loaded' }>['thought'];
@@ -62,6 +64,8 @@
 
 	let restored = $state(false);
 
+	let others = $state<Others>([]);
+
 	let ready = $state(false);
 
 	let saveState = $state<SaveState>('idle');
@@ -98,7 +102,32 @@
 			base = result.thought.revision;
 		}
 
+		others = await backups.others(doc, saved, { label, body, todo });
 		ready = true;
+	}
+
+	const refreshOthers = async () =>
+		(others = await backups.others(doc, saved, { label, body, todo }));
+
+	async function useOther(index: number) {
+		const other = others[index];
+
+		if (!other) return;
+
+		const current = { draft: { label, body, todo }, revision: base };
+
+		if (!backups.swapIn(doc, other, current, saved)) return;
+		({ label, body, todo } = other.draft);
+		base = other.revision;
+		restored = true;
+		await refreshOthers();
+	}
+
+	async function dropOther(index: number) {
+		const other = others[index];
+
+		if (other) backups.discard(other);
+		await refreshOthers();
 	}
 
 	async function noteConflict() {
@@ -187,6 +216,9 @@
 {:else if loading === 'failed'}
 	<p><a href="/">← back</a></p>
 	<p class="error">Could not load.</p>
+{:else if thought && !ready}
+	<p><a href="/">← back</a></p>
+	<p class="empty">Loading…</p>
 {:else if thought}
 	<p><a href="/">← back</a> · <a href="/ramble/{thought.rambleId}">source ramble</a></p>
 
@@ -217,6 +249,9 @@
 		conflict={saveState === 'conflict'}
 		{backupFailed}
 		{latest}
+		others={others.map((other) => other.draft)}
+		onuse={useOther}
+		ondrop={dropOther}
 		ondiscard={discard}
 		onrebase={rebase}
 	/>

@@ -29,6 +29,8 @@
 		}
 	}
 
+	type Others = Awaited<ReturnType<typeof backups.others>>;
+
 	type SaveState = 'idle' | 'saved' | 'invalid' | 'conflict';
 
 	const doc = $derived(`ramble:${id}`);
@@ -53,6 +55,8 @@
 	let latest = $state<{ body: string; revision: number } | null>(null);
 
 	let restored = $state(false);
+
+	let others = $state<Others>([]);
 
 	let ready = $state(false);
 
@@ -86,7 +90,27 @@
 			base = result.view.ramble.revision;
 		}
 
+		others = await backups.others(doc, saved, { body });
 		ready = true;
+	}
+
+	const refreshOthers = async () => (others = await backups.others(doc, saved, { body }));
+
+	async function useOther(index: number) {
+		const other = others[index];
+
+		if (!other || !backups.swapIn(doc, other, { draft: { body }, revision: base }, saved)) return;
+		({ body } = other.draft);
+		base = other.revision;
+		restored = true;
+		await refreshOthers();
+	}
+
+	async function dropOther(index: number) {
+		const other = others[index];
+
+		if (other) backups.discard(other);
+		await refreshOthers();
 	}
 
 	async function save(event: SubmitEvent) {
@@ -152,6 +176,8 @@
 	<p class="empty">No such ramble.</p>
 {:else if loading === 'failed'}
 	<p class="error">Could not load.</p>
+{:else if view && !ready}
+	<p class="empty">Loading…</p>
 {:else if view}
 	<p class="meta">
 		Started {new Date(view.ramble.createdAt).toLocaleString()} · {STATUS_TEXT[view.ramble.status]}
@@ -169,6 +195,9 @@
 		conflict={saveState === 'conflict'}
 		{backupFailed}
 		{latest}
+		others={others.map((other) => other.draft)}
+		onuse={useOther}
+		ondrop={dropOther}
 		ondiscard={discard}
 		onrebase={rebase}
 	/>

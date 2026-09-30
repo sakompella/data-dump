@@ -1,50 +1,58 @@
 import { describe, expect, it } from 'vitest';
-import { tolerant, type KeyedStorage } from './safe-storage';
+import { guardStore, writeConfirmed, type KeyedStorage } from './safe-storage';
+import { createFakeStorage } from './testing/fakes';
 
-const broken: KeyedStorage = {
-	getItem: () => {
-		throw new Error('blocked');
-	},
-	setItem: () => {
-		throw new DOMException('full', 'QuotaExceededError');
-	},
-	removeItem: () => {
-		throw new Error('blocked');
-	},
-	keys: () => {
-		throw new Error('blocked');
-	}
+const refuse = () => {
+	throw new Error('blocked');
 };
 
-describe('tolerant', () => {
-	it('never throws, gives empty answers, and reports each failure', () => {
-		let failures = 0;
-		const storage = tolerant(broken, () => (failures += 1));
+const working = (): KeyedStorage => createFakeStorage();
 
-		expect(storage.getItem('a')).toBeNull();
-		expect(() => storage.setItem('a', 'b')).not.toThrow();
-		expect(() => storage.removeItem('a')).not.toThrow();
-		expect(storage.keys()).toEqual([]);
-		expect(failures).toBe(4);
-	});
-
-	it('reports nothing when storage works', () => {
-		const items = new Map<string, string>();
+describe('guardStore', () => {
+	it('reports every kind of failure as a failure, never as empty or done', () => {
 		let failures = 0;
 
-		const storage = tolerant(
-			{
-				getItem: (key) => items.get(key) ?? null,
-				setItem: (key, value) => void items.set(key, value),
-				removeItem: (key) => void items.delete(key),
-				keys: () => [...items.keys()]
-			},
+		const store = guardStore(
+			{ getItem: refuse, setItem: refuse, removeItem: refuse, keys: refuse },
 			() => (failures += 1)
 		);
 
-		storage.setItem('a', 'b');
-		expect(storage.getItem('a')).toBe('b');
-		expect(storage.keys()).toEqual(['a']);
-		expect(failures).toBe(0);
+		expect(store.read('a')).toEqual({ ok: false });
+		expect(store.write('a', 'b')).toBe(false);
+		expect(store.remove('a')).toBe(false);
+		expect(store.keys()).toBeNull();
+		expect(failures).toBe(4);
+	});
+
+	it('tells an absent key from a failed read', () => {
+		const store = guardStore(working(), () => {});
+
+		expect(store.read('missing')).toEqual({ ok: true, value: null });
+		expect(store.write('a', 'b')).toBe(true);
+		expect(store.read('a')).toEqual({ ok: true, value: 'b' });
+		expect(store.keys()).toEqual(['a']);
+	});
+});
+
+describe('writeConfirmed', () => {
+	it('is false when the write fails, and when the value cannot be read back', () => {
+		const noWrite = guardStore({ ...working(), setItem: refuse }, () => {});
+		expect(writeConfirmed(noWrite, 'a', 'b')).toBe(false);
+
+		const noRead = guardStore({ ...working(), getItem: refuse }, () => {});
+		expect(writeConfirmed(noRead, 'a', 'b')).toBe(false);
+
+		const forgetful = guardStore({ ...working(), setItem: () => {} }, () => {});
+		expect(writeConfirmed(forgetful, 'a', 'b')).toBe(false);
+	});
+
+	it('is true when the store holds the value', () => {
+		expect(
+			writeConfirmed(
+				guardStore(working(), () => {}),
+				'a',
+				'b'
+			)
+		).toBe(true);
 	});
 });

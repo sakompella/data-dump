@@ -1,5 +1,7 @@
-// Browser storage can refuse writes (quota, blocked storage). Backups are a
-// safety net, so their failure must never stop the code that uses them.
+// Browser storage can refuse reads and writes (quota, blocked storage). Backups
+// are a safety net, so a failure must never stop the code that uses them, and
+// it must never look like "empty" or "done": every call says whether it worked,
+// and code that deletes a backup only does so after a confirmed success.
 export interface KeyedStorage {
 	getItem(key: string): string | null;
 	setItem(key: string, value: string): void;
@@ -14,22 +16,42 @@ export const browserStorage = (): KeyedStorage => ({
 	keys: () => Object.keys(localStorage)
 });
 
-// Every method swallows a thrown error and reports it through `onFailure`.
-export function tolerant(storage: KeyedStorage, onFailure: () => void): KeyedStorage {
-	function attempt<T>(work: () => T, fallback: T): T {
+// `ok: false` means the read did not happen; `value: null` means the key is absent.
+export type Read = { readonly ok: true; readonly value: string | null } | { readonly ok: false };
+
+export interface BackupStore {
+	read(key: string): Read;
+	write(key: string, value: string): boolean;
+	remove(key: string): boolean;
+	// Null when the keys could not be listed.
+	keys(): string[] | null;
+}
+
+// Every failure is reported through `onFailure` and returned as a failure result.
+export function guardStore(storage: KeyedStorage, onFailure: () => void): BackupStore {
+	function attempt<T, Failed>(work: () => T, failed: Failed): T | Failed {
 		try {
 			return work();
 		} catch {
 			onFailure();
 
-			return fallback;
+			return failed;
 		}
 	}
 
 	return {
-		getItem: (key) => attempt(() => storage.getItem(key), null),
-		setItem: (key, value) => attempt(() => storage.setItem(key, value), undefined),
-		removeItem: (key) => attempt(() => storage.removeItem(key), undefined),
-		keys: () => attempt(() => storage.keys(), [])
+		read: (key) =>
+			attempt(() => ({ ok: true as const, value: storage.getItem(key) }), { ok: false as const }),
+		write: (key, value) => attempt(() => (storage.setItem(key, value), true), false),
+		remove: (key) => attempt(() => (storage.removeItem(key), true), false),
+		keys: () => attempt(() => storage.keys(), null)
 	};
+}
+
+// Writes, then reads the value back. True only if the store now holds exactly `value`.
+export function writeConfirmed(store: BackupStore, key: string, value: string): boolean {
+	if (!store.write(key, value)) return false;
+	const back = store.read(key);
+
+	return back.ok && back.value === value;
 }

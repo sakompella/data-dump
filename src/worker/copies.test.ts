@@ -1,6 +1,6 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { copiesFromProposals, findSourcePassage } from './copies';
+import { copiesFromProposals, findSourcePassage, keptPassages } from './copies';
 
 const ramble = `Rev keeps stalling on the deploy.
 I think the EA argument   was weaker than it sounded,
@@ -9,14 +9,18 @@ honestly.
 maybe email Michael about Friday`;
 
 describe('copiesFromProposals', () => {
-	it('keeps a repeated or overlapping passage once', () => {
+	it('keeps a repeated or contained passage once, and a partly overlapping one as its own slice', () => {
 		const copies = copiesFromProposals(ramble, [
 			{ label: 'first', text: 'maybe email Michael', todo: true },
 			{ label: 'again', text: 'maybe email Michael', todo: false },
+			{ label: 'inside', text: 'email Michael', todo: false },
 			{ label: 'wider', text: 'email Michael about Friday', todo: false }
 		]);
 
-		expect(copies).toEqual([{ label: 'first', body: 'maybe email Michael', todo: 'open' }]);
+		expect(copies).toEqual([
+			{ label: 'first', body: 'maybe email Michael', todo: 'open' },
+			{ label: 'wider', body: 'email Michael about Friday', todo: 'none' }
+		]);
 	});
 
 	it('keeps verbatim passages as the exact source slice, in ramble order', () => {
@@ -92,28 +96,40 @@ describe('copiesFromProposals', () => {
 	});
 });
 
-describe('copiesFromProposals on any proposals', () => {
-	it('keeps exact source slices that never overlap', () => {
-		const words = ['alpha', 'beta', 'gamma', 'delta'];
-		const source = 'alpha beta gamma  delta alpha beta';
+describe('keptPassages on any proposals', () => {
+	const words = ['alpha', 'beta', 'gamma', 'delta'];
 
-		const proposal = fc.record({
-			label: fc.constant('l'),
-			text: fc
-				.array(fc.constantFrom(...words), { minLength: 1, maxLength: 3 })
-				.map((picked) => picked.join(' ')),
-			todo: fc.boolean()
-		});
+	const source = 'alpha beta gamma  delta alpha beta';
 
+	const proposal = fc.record({
+		label: fc.constant('l'),
+		text: fc
+			.array(fc.constantFrom(...words), { minLength: 1, maxLength: 3 })
+			.map((picked) => picked.join(' ')),
+		todo: fc.boolean()
+	});
+
+	it('keeps exact source slices, none inside another, and covers every proposed passage', () => {
 		fc.assert(
 			fc.property(fc.array(proposal, { maxLength: 8 }), (proposals) => {
-				const copies = copiesFromProposals(source, proposals);
-				let from = 0;
+				const kept = keptPassages(source, proposals);
 
-				for (const copy of copies) {
-					const at = source.indexOf(copy.body, from);
-					expect(at).toBeGreaterThanOrEqual(0);
-					from = at + copy.body.length;
+				for (const { start, end, copy } of kept) expect(source.slice(start, end)).toBe(copy.body);
+
+				for (const a of kept) {
+					for (const b of kept) {
+						if (a !== b) expect(a.start <= b.start && b.end <= a.end).toBe(false);
+					}
+				}
+
+				for (const p of proposals) {
+					const passage = findSourcePassage(source, p.text);
+
+					if (passage) {
+						const end = passage.start + passage.text.length;
+						const covered = kept.some((k) => k.start <= passage.start && end <= k.end);
+						expect(covered).toBe(true);
+					}
 				}
 			})
 		);

@@ -1,6 +1,6 @@
 // Cloudflare Access answers an expired session with a redirect to its own
 // login page, which a cross-origin fetch cannot follow. Treat that, and any
-// reply that is not JSON where JSON is expected, as an expired session.
+// reply that is not JSON (our API always answers JSON), as an expired session.
 export class SessionExpired extends Error {
 	constructor() {
 		super('session expired');
@@ -23,12 +23,7 @@ export function sessionAwareFetch<Answer extends Reply>(
 		const answer = await fetchFn(input, { ...init, redirect: 'manual' });
 		const isJson = answer.headers.get('content-type')?.includes('application/json') ?? false;
 
-		if (
-			answer.type === 'opaqueredirect' ||
-			answer.redirected ||
-			answer.status === 401 ||
-			(answer.ok && !isJson)
-		) {
+		if (answer.type === 'opaqueredirect' || answer.redirected || answer.status === 401 || !isJson) {
 			onExpired();
 			throw new SessionExpired();
 		}

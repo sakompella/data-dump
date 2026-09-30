@@ -5,13 +5,25 @@
 	import { newRambleId, parseRambleId, parseRevision, type Revision } from '../../shared/ids';
 	import { IDLE_GAP_MS } from '../../shared/idle';
 	import { api, type HomeData } from '../api';
-	import { oncePerGeneration } from '../end-gate';
 	import { trackSave } from '../pending-saves';
-	import { browserStorage, tolerant } from '../safe-storage';
+	import { browserStorage, guardStore, writeConfirmed } from '../safe-storage';
 	import { splitRamble } from '../split-client';
 
 	// `revision` is what the server last confirmed for `id`; saves are based on it.
 	type Draft = { id: RambleId; body: string; revision: Revision | null };
+
+	// The ramble the box is writing to, or one that was just ended and is being finished.
+	// `acked` is the body the server last confirmed for `id`, at `revision`.
+	interface Capture {
+		readonly key: string;
+		id: RambleId | null;
+		revision: Revision | null;
+		acked: string;
+		// Set when the capture ends: its text from then on, whatever is typed after.
+		frozen: string | null;
+		inFlight: Promise<boolean> | null;
+		saveTimer: ReturnType<typeof setTimeout> | undefined;
+	}
 
 	type SaveStatus = 'empty' | 'saving' | 'saved' | 'failed';
 
@@ -33,7 +45,8 @@
 
 	const backupSchema = z.object({ id: z.string(), body: z.string(), revision: nullableRevision });
 
-	// One backup per tab, so tabs never overwrite or clear each other's text.
+	// One backup per capture (`<prefix><tab>~<n>`), so neither tabs nor an ended
+	// capture and the next one overwrite each other's text.
 	const BACKUP_PREFIX = 'data-dump:draft:';
 
 	// Held for as long as a tab is open; a backup whose lock is free was left
@@ -52,12 +65,22 @@
 
 	const tabId = crypto.randomUUID();
 
-	const backupKey = `${BACKUP_PREFIX}${tabId}`;
+	let captures = 0;
+
+	const newCapture = (): Capture => ({
+		key: `${BACKUP_PREFIX}${tabId}~${(captures += 1)}`,
+		id: null,
+		revision: null,
+		acked: '',
+		frozen: null,
+		inFlight: null,
+		saveTimer: undefined
+	});
 
 	// Set when the browser refused a backup; saving to the server carries on.
 	let backupFailed = $state(false);
 
-	const store = tolerant(browserStorage(), () => (backupFailed = true));
+	const store = guardStore(browserStorage(), () => (backupFailed = true));
 
 	let text = $state('');
 
@@ -65,27 +88,21 @@
 
 	let endsInFlight = $state(0);
 
-	// `id` is the ramble this box writes to; null until the first character.
-	// `acked` is the body the server last confirmed for it, at `revision`.
-	// `capture` changes whenever the box starts a new ramble, so replies for
-	// an older one are ignored.
-	let id: RambleId | null = null;
+	let current = newCapture();
 
-	let revision: Revision | null = null;
+	// Captures that ended but could not be saved; the Retry button tries them again.
+	let failedEnds: Capture[] = [];
 
-	let acked = '';
-
-	let capture = 0;
-
-	let saveInFlight: Promise<boolean> | null = null;
+	const endJobs = new Set<Promise<void>>();
 
 	let lastInputAt = Date.now();
 
 	let releaseTab: (() => void) | undefined;
 
-	let saveTimer: ReturnType<typeof setTimeout> | undefined;
-
 	let idleTimer: ReturnType<typeof setTimeout> | undefined;
+
+	// The text of a capture: what is in the box, or what it held when it ended.
+	const bodyOf = (capture: Capture) => capture.frozen ?? text;
 
 	function parseBackup(raw: string | null): Draft | null {
 		try {
@@ -100,9 +117,18 @@
 		}
 	}
 
-	function writeBackup() {
-		if (id === null) store.removeItem(backupKey);
-		else store.setItem(backupKey, JSON.stringify({ id, body: text, revision }));
+	const encodeBackup = (capture: Capture, body: string) =>
+		JSON.stringify({ id: capture.id, body, revision: capture.revision });
+
+	function writeBackup(capture: Capture) {
+		if (capture.id === null) store.remove(capture.key);
+		else store.write(capture.key, encodeBackup(capture, bodyOf(capture)));
+	}
+
+	// The backup goes once the server holds exactly the capture's text.
+	function settleBackup(capture: Capture) {
+		if (bodyOf(capture) === capture.acked && capture.revision !== null) store.remove(capture.key);
+		else writeBackup(capture);
 	}
 
 	type SaveReply = { ok: true; id: RambleId; revision: Revision | null } | { ok: false };
@@ -127,53 +153,54 @@
 		}
 	}
 
-	async function saveCurrent(target: { capture: number; draft: Draft }): Promise<boolean> {
-		const reply = await putDraft(target.draft);
-
-		if (target.capture !== capture) return reply.ok;
+	async function saveOnce(capture: Capture, id: RambleId, body: string): Promise<boolean> {
+		const reply = await putDraft({ id, body, revision: capture.revision });
 
 		if (!reply.ok) {
 			// The text stays in the backup.
-			status = 'failed';
+			if (capture === current) status = 'failed';
 
 			return false;
 		}
 
-		id = reply.id;
-		revision = reply.revision;
-		acked = target.draft.body;
-		status = text === acked ? 'saved' : 'saving';
+		capture.id = reply.id;
+		capture.revision = reply.revision;
+		capture.acked = body;
+		settleBackup(capture);
 
-		if (text === acked) store.removeItem(backupKey);
-		else writeBackup();
+		if (capture === current) status = text === capture.acked ? 'saved' : 'saving';
 
 		return true;
 	}
 
-	// One save in flight at a time; later text waits and goes in the next one.
-	async function save(pickBody: () => string): Promise<boolean> {
-		while (saveInFlight) await saveInFlight;
-		const body = pickBody();
+	// One save in flight per capture at a time. Whatever waits is sent with the
+	// capture's text as it is when its turn comes, so text typed after a capture
+	// ended can never reach it.
+	async function save(capture: Capture): Promise<boolean> {
+		while (capture.inFlight) await capture.inFlight;
+		const body = bodyOf(capture);
 
-		if (id === null) return true;
+		if (capture.id === null) return true;
 
-		if (body === acked && revision !== null) {
-			if (text === acked) status = 'saved';
+		if (body === capture.acked && capture.revision !== null) {
+			settleBackup(capture);
+
+			if (capture === current && text === capture.acked) status = 'saved';
 
 			return true;
 		}
 
-		status = 'saving';
-		saveInFlight = saveCurrent({ capture, draft: { id, body, revision } }).finally(
-			() => (saveInFlight = null)
-		);
+		if (capture === current) status = 'saving';
+		const inFlight = saveOnce(capture, capture.id, body).finally(() => (capture.inFlight = null));
+		capture.inFlight = inFlight;
 
-		return saveInFlight;
+		return inFlight;
 	}
 
 	function scheduleSave() {
-		clearTimeout(saveTimer);
-		saveTimer = setTimeout(() => save(() => text), SAVE_DELAY_MS);
+		const capture = current;
+		clearTimeout(capture.saveTimer);
+		capture.saveTimer = setTimeout(() => void save(capture), SAVE_DELAY_MS);
 	}
 
 	function scheduleIdleEnd() {
@@ -181,25 +208,7 @@
 		idleTimer = setTimeout(endCurrent, IDLE_GAP_MS);
 	}
 
-	function startCapture(body: string) {
-		capture += 1;
-		acked = '';
-		revision = null;
-		text = body;
-		id = body === '' ? null : newRambleId();
-		lastInputAt = Date.now();
-		status = body === '' ? 'empty' : 'saving';
-		writeBackup();
-
-		if (body !== '') {
-			scheduleSave();
-			scheduleIdleEnd();
-		}
-	}
-
 	async function endOnServer(endingId: RambleId) {
-		endsInFlight += 1;
-
 		try {
 			const response = await api.ramble.end.$post({ json: { id: endingId } });
 
@@ -212,87 +221,106 @@
 			}
 		} catch (error) {
 			console.warn('ending ramble failed; it will end on a later page load', error);
+		}
+	}
+
+	async function finishEnd(capture: Capture) {
+		endsInFlight += 1;
+
+		try {
+			// The capture's own text is saved first; `id` may have moved to a replacement ramble.
+			if (!(await save(capture)) || capture.id === null) {
+				failedEnds.push(capture);
+				status = 'failed';
+
+				return;
+			}
+
+			await endOnServer(capture.id);
 		} finally {
 			endsInFlight -= 1;
 			onchange();
 		}
 	}
 
-	// Saves exactly what is in the box now, then ends that ramble. Text typed
-	// while the save runs starts the next ramble.
-	const endOnce = oncePerGeneration(() => capture);
+	function startEndJob(capture: Capture) {
+		const job = finishEnd(capture).finally(() => endJobs.delete(job));
+		endJobs.add(job);
+	}
 
-	const endCurrent = () =>
-		endOnce(async () => {
-			clearTimeout(idleTimer);
+	// The box starts a new ramble at once; the ended one is frozen at what it held
+	// now, saved, and ended in the background. Text typed from here on is the next
+	// ramble's and can no longer reach the ended one.
+	function endCurrent() {
+		clearTimeout(idleTimer);
+		const ending = current;
 
-			if (id === null) return;
-			const generation = capture;
-			const snapshot = text;
-			clearTimeout(saveTimer);
+		if (ending.id === null) return;
+		clearTimeout(ending.saveTimer);
+		ending.frozen = text;
+		writeBackup(ending);
+		current = newCapture();
+		text = '';
+		status = 'empty';
+		lastInputAt = Date.now();
+		startEndJob(ending);
+	}
 
-			if (!(await save(() => snapshot))) return;
+	function retry() {
+		void save(current);
 
-			// Another path already moved on to a new capture; ending `id` now would end that one.
-			if (capture !== generation || id === null) return;
-			const endingId = id;
-			startCapture(text.startsWith(snapshot) ? text.slice(snapshot.length) : text);
-			void endOnServer(endingId);
-		});
+		for (const capture of failedEnds.splice(0)) startEndJob(capture);
+	}
 
-	const isPastIdleGap = () => id !== null && Date.now() - lastInputAt > IDLE_GAP_MS;
+	const isPastIdleGap = () => current.id !== null && Date.now() - lastInputAt > IDLE_GAP_MS;
 
 	function endIfIdle() {
-		if (isPastIdleGap()) void endCurrent();
+		if (isPastIdleGap()) endCurrent();
 	}
 
 	// Coming back after the idle gap: clear the box before the keystroke
 	// lands, so the new ramble never starts with the old text.
 	function onbeforeinput() {
-		if (!isPastIdleGap() || id === null) return;
-
-		if (text !== acked || saveInFlight) {
-			void endCurrent();
-
-			return;
-		}
-
-		const endingId = id;
-		startCapture('');
+		if (!isPastIdleGap()) return;
+		endCurrent();
 		flushSync();
-		void endOnServer(endingId);
 	}
 
 	function oninput() {
 		lastInputAt = Date.now();
 
-		if (id === null && text !== '') id = newRambleId();
-		writeBackup();
-		status = id === null ? 'empty' : 'saving';
+		if (current.id === null && text !== '') current.id = newRambleId();
+		writeBackup(current);
+		status = current.id === null ? 'empty' : 'saving';
 		scheduleSave();
 		scheduleIdleEnd();
 	}
 
 	const tabIsGone = (otherTabId: string) =>
-		navigator.locks.request(`${TAB_LOCK_PREFIX}${otherTabId}`, { ifAvailable: true }, (lock) => lock !== null);
-
-	// Backups left by tabs that are gone, other than ones the server already holds.
-	async function orphanedBackups(): Promise<{ key: string; draft: Draft }[]> {
-		const keys = store.keys().filter(
-			(key) => key.startsWith(BACKUP_PREFIX) && key !== backupKey
+		navigator.locks.request(
+			`${TAB_LOCK_PREFIX}${otherTabId}`,
+			{ ifAvailable: true },
+			(lock) => lock !== null
 		);
 
+	// Backups left by tabs that are gone. A backup is removed here only if the
+	// server already holds exactly that text; one that cannot be read or parsed stays.
+	async function orphanedBackups(): Promise<{ key: string; draft: Draft }[]> {
 		const found: { key: string; draft: Draft }[] = [];
 
-		for (const key of keys) {
-			if (!(await tabIsGone(key.slice(BACKUP_PREFIX.length)))) continue;
-			const backup = parseBackup(store.getItem(key));
+		for (const key of store.keys() ?? []) {
+			const owner = key.slice(BACKUP_PREFIX.length).split('~')[0] ?? '';
 
-			if (!backup || (backup.id === draft?.id && backup.body === draft.body)) {
-				store.removeItem(key);
-			} else {
-				found.push({ key, draft: backup });
-			}
+			if (!key.startsWith(BACKUP_PREFIX) || owner === tabId) continue;
+
+			if (!(await tabIsGone(owner))) continue;
+			const read = store.read(key);
+			const backup = read.ok ? parseBackup(read.value) : null;
+
+			if (!backup) continue;
+
+			if (backup.id === draft?.id && backup.body === draft.body) store.remove(key);
+			else found.push({ key, draft: backup });
 		}
 
 		return found;
@@ -301,13 +329,15 @@
 	// A backup that does not go into the box is saved as it is. Its record
 	// is removed only once the server has confirmed that exact text.
 	async function saveOrphan({ key, draft }: { key: string; draft: Draft }) {
-		if ((await putDraft(draft)).ok) store.removeItem(key);
+		const reply = await putDraft(draft);
+
+		if (reply.ok) store.remove(key);
 	}
 
 	async function restore() {
 		const [first, ...rest] = await orphanedBackups();
 		// Typing during the lock checks above wins; restored text is then saved on its own.
-		const untouched = text === '' && id === null;
+		const untouched = text === '' && current.id === null;
 
 		if (!untouched) {
 			for (const orphan of first ? [first, ...rest] : rest) await saveOrphan(orphan);
@@ -316,19 +346,20 @@
 		}
 
 		if (first) {
-			id = first.draft.id;
+			current.id = first.draft.id;
 			text = first.draft.body;
-			revision = first.draft.revision;
-			acked = '';
-			writeBackup();
-			store.removeItem(first.key);
-			void save(() => text);
+			current.revision = first.draft.revision;
+			current.acked = '';
+
+			// The old record goes only once this tab's copy reads back.
+			if (writeConfirmed(store, current.key, encodeBackup(current, text))) store.remove(first.key);
+			void save(current);
 			scheduleIdleEnd();
 		} else if (draft) {
-			id = draft.id;
+			current.id = draft.id;
 			text = draft.body;
-			revision = draft.revision;
-			acked = draft.body;
+			current.revision = draft.revision;
+			current.acked = draft.body;
 			lastInputAt = new Date(draft.updatedAt).getTime();
 			status = 'saved';
 			idleTimer = setTimeout(endCurrent, Math.max(0, lastInputAt + IDLE_GAP_MS - Date.now()));
@@ -346,13 +377,12 @@
 		void restore();
 
 		return () => {
-			clearTimeout(saveTimer);
+			clearTimeout(current.saveTimer);
 			clearTimeout(idleTimer);
 			// Text typed in the last moments is saved, not dropped. The tab lock stays
-			// held until then, so a failed save leaves a backup the next page cannot
-			// mistake for an orphan yet, and one it can once the lock is released.
-			const flush = save(() => text).finally(() => releaseTab?.());
-			trackSave(flush);
+			// held until every save has settled, so a failed one leaves backups that the
+			// next page cannot mistake for an orphan yet, and can once the lock is released.
+			trackSave(Promise.all([save(current), ...endJobs]).finally(() => releaseTab?.()));
 		};
 	});
 </script>
@@ -375,7 +405,7 @@
 		<button type="button" onclick={endCurrent}>New ramble</button>
 		<span class="status" class:failed={status === 'failed'}>{STATUS_TEXT[status]}</span>
 		{#if status === 'failed'}
-			<button type="button" class="small" onclick={() => save(() => text)}>Retry</button>
+			<button type="button" class="small" onclick={retry}>Retry</button>
 		{/if}
 		{#if backupFailed}<span class="status failed">backup unavailable in this browser</span>{/if}
 		{#if endsInFlight > 0}<span class="status">splitting…</span>{/if}

@@ -34,29 +34,42 @@ export const wholeRambleCopy = (ramble: string): ThoughtCopy => ({
 	todo: 'none'
 });
 
-// Keeps only proposals that are the user's own words, in ramble order. Repeated
-// or overlapping passages are kept once (the first proposal wins).
-export function copiesFromProposals(
+export interface KeptPassage {
+	readonly start: number;
+	readonly end: number;
+	readonly copy: ThoughtCopy;
+}
+
+// Keeps only proposals that are the user's own words, in ramble order. A proposal
+// whose passage is the same as, or inside, one already kept is dropped; passages
+// that only partly overlap are kept, each as its own exact slice.
+export function keptPassages(ramble: string, proposals: readonly ProposedThought[]): KeptPassage[] {
+	const found = proposals.flatMap((proposal) => {
+		const passage = findSourcePassage(ramble, proposal.text);
+
+		if (!passage) return [];
+		const label = proposal.label.trim() || fallbackLabel(passage.text);
+		const todo: TodoState = proposal.todo ? 'open' : 'none';
+		const end = passage.start + passage.text.length;
+
+		return [{ start: passage.start, end, copy: { label, body: passage.text, todo } }];
+	});
+
+	// Earlier start first, and the longer passage first at the same start, so a
+	// passage can only sit inside one that was already kept.
+	const ordered = [...found].sort((a, b) => a.start - b.start || b.end - a.end);
+	const kept: KeptPassage[] = [];
+
+	for (const passage of ordered) {
+		const inside = kept.some((k) => k.start <= passage.start && passage.end <= k.end);
+
+		if (!inside) kept.push(passage);
+	}
+
+	return kept;
+}
+
+export const copiesFromProposals = (
 	ramble: string,
 	proposals: readonly ProposedThought[]
-): ThoughtCopy[] {
-	return proposals
-		.flatMap((proposal) => {
-			const passage = findSourcePassage(ramble, proposal.text);
-
-			if (!passage) return [];
-			const label = proposal.label.trim() || fallbackLabel(passage.text);
-			const todo: TodoState = proposal.todo ? 'open' : 'none';
-
-			const end = passage.start + passage.text.length;
-
-			return [{ start: passage.start, end, copy: { label, body: passage.text, todo } }];
-		})
-		.sort((a, b) => a.start - b.start)
-		.reduce<{ end: number; kept: ThoughtCopy[] }>(
-			// A passage that starts inside one already kept would repeat some of its words.
-			(acc, item) =>
-				item.start < acc.end ? acc : { end: item.end, kept: [...acc.kept, item.copy] },
-			{ end: 0, kept: [] }
-		).kept;
-}
+): ThoughtCopy[] => keptPassages(ramble, proposals).map(({ copy }) => copy);
