@@ -13,8 +13,9 @@
 		".roo/**",
 		".windsurf/**",
 		".audit/**",
-		".svelte-kit/**",
-		"build/**",
+		"dist/**",
+		".wrangler/**",
+		"worker-configuration.d.ts",
 		"tools/oxlint/anti-slop/**"
 	],
 	"jsPlugins": [

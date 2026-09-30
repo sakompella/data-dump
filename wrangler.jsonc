@@ -1,22 +1,24 @@
 {
 	"$schema": "./node_modules/wrangler/config-schema.json",
 	"name": "data-dump",
-	"main": ".svelte-kit/cloudflare/_worker.js",
+	"main": "src/worker/index.ts",
 	"compatibility_date": "2026-09-26",
-	"compatibility_flags": ["nodejs_compat"],
 	"assets": {
-		"binding": "ASSETS",
-		"directory": ".svelte-kit/cloudflare"
+		"not_found_handling": "single-page-application",
+		"run_worker_first": ["/api/*"]
 	},
+	"durable_objects": {
+		"bindings": [{ "name": "USER_DATA", "class_name": "UserData" }]
+	},
+	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["UserData"] }],
 	"observability": {
 		"enabled": true,
 		"head_sampling_rate": 1
 	},
-	"r2_buckets": [{ "binding": "DATA", "bucket_name": "data-dump" }],
 	// Placeholders. docs/deploy.md says where each value comes from.
 	"vars": {
 		"ACCESS_TEAM_DOMAIN": "https://<your-team>.cloudflareaccess.com",
 		"ACCESS_AUD": "<access-application-audience-tag>",
-		"PUBLIC_CHATGPT_MODEL": ""
+		"CHATGPT_MODEL": ""
 	}
 }

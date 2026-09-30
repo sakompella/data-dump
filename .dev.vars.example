@@ -1,0 +1,5 @@
+# Copy to .dev.vars for local development. Never commit .dev.vars.
+
+# Stands in for Cloudflare Access when running `pnpm dev`. Ignored in a build.
+# Letters, digits, "_" and "-" only, up to 128 characters.
+DEV_USER_ID=me

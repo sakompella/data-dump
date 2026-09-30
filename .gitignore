@@ -1,6 +1,6 @@
 node_modules/
-.svelte-kit/
-build/
+dist/
+worker-configuration.d.ts
 .env
 .env.*
 .dev.vars
