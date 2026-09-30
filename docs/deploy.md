@@ -38,6 +38,8 @@ Do not set `DEV_USER_ID` here. It only works in `pnpm dev`. `pnpm preview` answe
 
 ## 3. Deploy
 
+Redeploy after step 2 (and after any later change to the values there).
+
 ```sh
 pnpm install
 pnpm build && pnpm exec wrangler deploy
@@ -49,6 +51,13 @@ The first deploy creates the `UserData` Durable Object class through the migrati
 
 Open the site, then `/connect`, and follow the steps. The sign-in stays in that browser.
 The Worker never sees it.
+
+## Check the setup
+
+1. Open `https://<your-worker-host>/api/config` in a browser that is signed in through Access. It should show `{"chatgptModel":...}`.
+2. If it shows `{"error":"unauthorized"}`, run `pnpm exec wrangler tail` and reload. A line `access denied: ...` gives the reason.
+   No Cloudflare docs page states that `Cf-Access-Jwt-Assertion` reaches a Worker under Worker-level Access, so this check matters.
+   If the header is missing, use the hostname-based Access application instead.
 
 ## Existing data
 
