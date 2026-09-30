@@ -185,7 +185,7 @@ describe('login', () => {
 	});
 
 	it('round-trips the token file with mode 0600', async () => {
-		const { auth } = await connect([]);
+		await connect([]);
 		expect(await readTokenFile()).toEqual({
 			accessToken: 'access-1',
 			refreshToken: 'refresh-1',
