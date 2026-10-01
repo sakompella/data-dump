@@ -104,3 +104,38 @@ Recorded after rereading the source thread; neither item is a requirement.
 
 - Storage format. Markdown with YAML frontmatter was suggested, not decided.
 - Thinking help is parked as not MVP. The user said "ask me only MVP stuff"; parking it was the assistant's call, and the user may object.
+
+## 2026-09-30: Hosting, storage, and sign-in
+
+### User's wording
+
+On the ChatGPT sign-in terms:
+
+> TOS is fine, i know it to be correct
+
+On what "auth in the browser" meant:
+
+> I meant the ChatGPT token, but i guess it'll be both? idk abt browser auth
+
+On users and the site login:
+
+> one for now, several down the line
+
+> Drop app_password and use Cloudflare access
+
+On storage:
+
+> a DO per user makes sense. we dont have to store markdown files, it can be like just other stuff.
+
+On the stack:
+
+> ok stay with svelte + vite + hono
+
+### Settled direction
+
+- The app runs on Cloudflare. Each user's data lives in one Durable Object; Markdown files are not needed. An export may come later.
+- One user now; more users later.
+- Cloudflare Access is the site login. ChatGPT sign-in tokens stay in the browser. There is no API-key path.
+- This supersedes the open item "Storage format. Markdown with YAML frontmatter was suggested, not decided."
+
+The reasoning is recorded in `docs/agent/adr/`.
