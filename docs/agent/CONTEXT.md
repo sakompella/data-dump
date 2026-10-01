@@ -13,6 +13,10 @@ An action or possible action the user wants to remember to address. Inclusion do
 **Ramble**:
 A contiguous stream of the user's writing or speech that may contain any number of thoughts, to-dos, or other material. A ramble ends when the user starts a new one or after a short period of inactivity.
 
+**Split**:
+Turning an ended ramble into thoughts by copying passages of the user's own words, unchanged. Only labels may be generated.
+_Avoid_: summarize, extract, rewrite
+
 **Synthesis**:
 A generated account of captured material that helps the user recover its meaning. It is an interpretation, distinct from the user's original wording.
 

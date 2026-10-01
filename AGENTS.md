@@ -8,6 +8,7 @@ A small personal website for dumping messy thoughts and getting them back later.
 - Files matching `_*.md` are local scratch (decision logs, summaries) and are never committed.
 - The user's writing is the primary content. Model output supports it and must not replace it.
 - Use pnpm. Deploys go through Cloudflare; see `docs/deploy.md`.
+- Never lose the user's text. Read `docs/agent/adr/0005-unsaved-text-protection.md` before changing saving, backups, or recovery.
 
 ## Agent skills
 
